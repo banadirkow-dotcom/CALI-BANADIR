@@ -383,13 +383,61 @@ export interface StoreSettings {
 
 export type SystemPortal = 'super_admin' | 'delivery' | 'banadir';
 
+export type OrderLifecycleStatus =
+  | 'draft'
+  | 'confirmed'
+  | 'payment_pending'
+  | 'partially_paid'
+  | 'paid'
+  | 'ready'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled'
+  | 'expired'
+  | 'converted';
+
+export type OrderPaymentStatus =
+  | 'unpaid'
+  | 'initiated'
+  | 'pending'
+  | 'partially_paid'
+  | 'verified'
+  | 'paid'
+  | 'failed'
+  | 'reversed';
+
+export interface OrderEvent {
+  id: string;
+  orderId: string;
+  action: string;
+  title: string;
+  description: string;
+  actor: string;
+  timestamp: string;
+  oldValue?: string;
+  newValue?: string;
+  note?: string;
+}
+
 export interface OrderItem {
   productId: string;
   productName: string;
+  sku?: string;
+  imageUrl?: string;
   quantity: number;
   sellingPrice: number;
   costPrice: number;
+  discount?: number;
   total: number;
+}
+
+export interface OrderAdvanceAllocation {
+  deliveryFee: number;
+  deliveryCovered: number;
+  remainingDelivery: number;
+  productCovered: number;
+  remainingProduct: number;
+  feePayer: 'Customer' | 'Business';
 }
 
 export interface Order {
@@ -403,20 +451,45 @@ export interface Order {
   items: OrderItem[];
   subtotal: number;
   discount: number;
+  discountType?: 'fixed' | 'percentage';
+  discountValue?: number;
   deliveryFee: number;
+  deliveryFeePayer?: 'Customer' | 'Business';
   cargoFee: number;
   total: number;
   paidAmount: number;
   advanceAmount?: number;
+  allocation?: OrderAdvanceAllocation;
+  paymentType?: 'full_payment' | 'partial_payment' | 'full_credit';
+  paymentMethod?: string;
+  paymentProvider?: string;
+  paymentStatus?: OrderPaymentStatus;
+  paymentVerificationReference?: string;
+  paymentVerifiedAt?: string;
+  paymentVerifiedBy?: string;
   fulfillmentType: FulfillmentType;
+  fulfillmentStatus?: string;
   deliveryAddress?: string;
-  cargoCompany?: string;
+  deliveryDistrict?: string;
+  deliveryZone?: string;
+  deliveryCompany?: string;
   driverId?: string;
   driverName?: string;
-  status: 'pending' | 'confirmed' | 'ready' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'converted';
+  driverPhone?: string;
+  driverVehicle?: string;
+  cargoCompany?: string;
+  cargoRegion?: string;
+  cargoDestination?: string;
+  cargoRate?: number;
+  cargoPhone?: string;
+  portalToken?: string;
+  portalTokenExpiresAt?: string;
+  status: OrderLifecycleStatus | 'pending' | 'confirmed' | 'ready' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'converted';
   convertedSaleId?: string;
   notes?: string;
+  events?: OrderEvent[];
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface InventoryMovement {

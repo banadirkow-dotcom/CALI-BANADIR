@@ -28,9 +28,12 @@ import { ReceivePaymentModal } from './components/views/ReceivePaymentModal';
 import { AccountTransferModal } from './components/views/AccountTransferModal';
 import { SalesReturnModal } from './components/views/SalesReturnModal';
 import { ReceiptModal } from './components/common/ReceiptModal';
-import { Sale, Customer, Product } from './types';
+import { OrdersView } from './components/views/OrdersView';
+import { CustomerOrderPortalModal } from './components/views/CustomerOrderPortalModal';
+import { Sale, Customer, Product, Order } from './types';
 
 const MainApp: React.FC = () => {
+  const { convertOrderToSale, getOrderByPortalToken } = useStore();
   const [activeTab, setActiveTab] = useState<NavSection>('dashboard');
 
   // Modals state
@@ -47,6 +50,23 @@ const MainApp: React.FC = () => {
   const [activeReturnSale, setActiveReturnSale] = useState<Sale | null>(null);
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [isReceivePaymentOpen, setIsReceivePaymentOpen] = useState(false);
+  const [directPortalOrder, setDirectPortalOrder] = useState<Order | null>(null);
+
+  // Check URL on load for direct portal token links
+  React.useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('portal_token') || params.get('order_token') || params.get('token');
+      if (token) {
+        const found = getOrderByPortalToken(token);
+        if (found) {
+          setDirectPortalOrder(found);
+        }
+      }
+    } catch {
+      // safe fallback
+    }
+  }, [getOrderByPortalToken]);
 
   // Quick sale pre-fill product
   const [prefilledProduct, setPrefilledProduct] = useState<Product | null>(null);
@@ -127,6 +147,17 @@ const MainApp: React.FC = () => {
                   status: 'active',
                 };
                 handleOpenReceivePayment(dummyCust);
+              }}
+            />
+          )}
+
+          {activeTab === 'orders' && (
+            <OrdersView
+              onConvertSale={(orderId) => {
+                const sale = convertOrderToSale(orderId);
+                if (sale) {
+                  setActiveReceiptSale(sale);
+                }
               }}
             />
           )}
@@ -243,6 +274,18 @@ const MainApp: React.FC = () => {
         isOpen={!!activeReceiptSale}
         onClose={() => setActiveReceiptSale(null)}
         sale={activeReceiptSale}
+      />
+
+      <CustomerOrderPortalModal
+        isOpen={!!directPortalOrder}
+        onClose={() => setDirectPortalOrder(null)}
+        order={directPortalOrder}
+        onConvertSale={(orderId) => {
+          const sale = convertOrderToSale(orderId);
+          if (sale) {
+            setActiveReceiptSale(sale);
+          }
+        }}
       />
     </div>
   );

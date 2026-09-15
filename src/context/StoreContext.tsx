@@ -27,6 +27,8 @@ import {
   CargoShipment,
   Order,
   OrderItem,
+  OrderEvent,
+  OrderPaymentStatus,
   AuditLog,
   SystemPortal,
 } from '../types';
@@ -67,10 +69,14 @@ interface StoreContextType {
   // Actions
   createSale: (sale: Omit<Sale, 'id' | 'invoiceNo'>) => Sale;
   createOrder: (order: Omit<Order, 'id' | 'orderNo' | 'createdAt'>) => Order;
+  updateOrder: (orderId: string, updates: Partial<Order>, note?: string) => void;
   updateOrderStatus: (orderId: string, status: Order['status']) => void;
   convertOrderToSale: (orderId: string) => Sale | null;
-  recordOrderPayment: (orderId: string, amount: number, paymentMethod?: string) => void;
+  recordOrderPayment: (orderId: string, amount: number, paymentMethod?: string, paymentProvider?: string, referenceNo?: string) => void;
+  verifyOrderPayment: (orderId: string, referenceNo?: string) => void;
   cancelOrder: (orderId: string, reason?: string) => void;
+  getOrderByPortalToken: (token: string) => Order | null;
+  generateCustomerPortalUrl: (order: Order) => string;
   processReturn: (returnRecord: Omit<SaleReturn, 'id' | 'returnNo'>) => void;
   addProduct: (product: Omit<Product, 'id' | 'code' | 'createdAt'>) => Product;
   updateProduct: (id: string, updates: Partial<Product>, reason?: string) => void;
@@ -98,6 +104,7 @@ interface StoreContextType {
 
   addCustomer: (customer: Omit<Customer, 'id' | 'totalPurchases' | 'createdAt'>) => Customer;
   updateCustomer: (id: string, updates: Partial<Customer>) => void;
+  checkDuplicateCustomer: (name: string, phone?: string) => Customer | null;
   receiveCustomerPayment: (customerId: string, amount: number, accountId: string, invoiceId?: string) => void;
 
   addDriver: (driver: Omit<Driver, 'id' | 'deliveriesCompleted' | 'cashHeld' | 'pendingDeliveries'>) => Driver;
@@ -930,34 +937,91 @@ const INITIAL_ORDERS: Order[] = [
       {
         productId: 'prod-4',
         productName: 'Basmati Rice Premium 25kg',
+        sku: 'GRN-RICE-25KG',
+        imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=150&auto=format&fit=crop&q=60',
         quantity: 1,
         costPrice: 22.00,
         sellingPrice: 28.50,
+        discount: 0,
         total: 28.50,
       },
       {
         productId: 'prod-3',
-        productName: 'Mineral Water 500ml (Carton of 24)',
+        productName: 'Somali Mineral Water 500ml',
+        sku: 'BEV-WATER-500',
+        imageUrl: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?w=150&auto=format&fit=crop&q=60',
         quantity: 1,
         costPrice: 3.80,
         sellingPrice: 5.50,
+        discount: 0,
         total: 5.50,
       },
     ],
     subtotal: 34.00,
     discount: 1.00,
     deliveryFee: 2.00,
+    deliveryFeePayer: 'Customer',
     cargoFee: 0,
     total: 35.00,
     paidAmount: 20.00,
     advanceAmount: 20.00,
+    paymentType: 'partial_payment',
+    paymentMethod: 'EVC Plus',
+    paymentProvider: 'Hormuud Telecom',
+    paymentStatus: 'verified',
+    paymentVerificationReference: 'EVC-9948201',
+    paymentVerifiedAt: '2026-09-15T13:35:00Z',
+    paymentVerifiedBy: 'Banadir Admin',
+    allocation: {
+      deliveryFee: 2.00,
+      deliveryCovered: 2.00,
+      remainingDelivery: 0,
+      productCovered: 18.00,
+      remainingProduct: 15.00,
+      feePayer: 'Customer',
+    },
     fulfillmentType: 'Delivery',
+    deliveryDistrict: 'Wadajir',
     deliveryAddress: 'Wadajir, Airport Road, Mogadishu',
     driverId: 'drv-1',
     driverName: 'Guled Nuur Ali',
+    driverPhone: '+252 61 700 8899',
+    driverVehicle: 'Motorcycle (Plate: MOG-4412)',
+    deliveryCompany: 'Banadir Express Fleet',
     status: 'out_for_delivery',
+    portalToken: 'cpt_89f3b1e7c2a4d5e6f7a8b9c0',
     notes: 'Please deliver before Maghrib prayer',
+    events: [
+      {
+        id: 'evt-10027-3',
+        orderId: 'order-10027',
+        action: 'OUT_FOR_DELIVERY',
+        title: 'Out For Delivery',
+        description: 'Assigned to driver Guled Nuur Ali (+252 61 700 8899)',
+        actor: 'Admin',
+        timestamp: '2026-09-15T14:15:00Z',
+      },
+      {
+        id: 'evt-10027-2',
+        orderId: 'order-10027',
+        action: 'PAYMENT_VERIFIED',
+        title: 'Advance Payment Verified',
+        description: 'Advance payment of $20.00 verified via EVC Plus [Ref: EVC-9948201]',
+        actor: 'Banadir Admin',
+        timestamp: '2026-09-15T13:35:00Z',
+      },
+      {
+        id: 'evt-10027-1',
+        orderId: 'order-10027',
+        action: 'ORDER_CREATED',
+        title: 'Order Created',
+        description: 'Pre-sale order O00027 created. Total: $35.00, Advance: $20.00',
+        actor: 'Admin',
+        timestamp: '2026-09-15T13:30:00Z',
+      },
+    ],
     createdAt: '2026-09-15T13:30:00Z',
+    updatedAt: '2026-09-15T14:15:00Z',
   },
   {
     id: 'order-10026',
@@ -971,24 +1035,63 @@ const INITIAL_ORDERS: Order[] = [
       {
         productId: 'prod-6',
         productName: 'Nido Fortified Milk Powder 2.5kg',
+        sku: 'DRY-NIDO-2500',
+        imageUrl: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?w=150&auto=format&fit=crop&q=60',
         quantity: 2,
         costPrice: 19.50,
         sellingPrice: 24.00,
+        discount: 0,
         total: 48.00,
       },
     ],
     subtotal: 48.00,
     discount: 3.00,
     deliveryFee: 2.00,
+    deliveryFeePayer: 'Customer',
     cargoFee: 0,
     total: 47.00,
     paidAmount: 10.00,
     advanceAmount: 10.00,
+    paymentType: 'partial_payment',
+    paymentMethod: 'E-Dahab',
+    paymentProvider: 'Dahabshiil',
+    paymentStatus: 'pending',
+    allocation: {
+      deliveryFee: 2.00,
+      deliveryCovered: 2.00,
+      remainingDelivery: 0,
+      productCovered: 8.00,
+      remainingProduct: 37.00,
+      feePayer: 'Customer',
+    },
     fulfillmentType: 'Delivery',
+    deliveryDistrict: 'Hodan',
     deliveryAddress: 'Hodan, Taleex Street, Mogadishu',
     status: 'ready',
+    portalToken: 'cpt_62a4d5e6f7a8b9c089f3b1e7',
     notes: 'Call before arriving',
+    events: [
+      {
+        id: 'evt-10026-2',
+        orderId: 'order-10026',
+        action: 'ORDER_READY',
+        title: 'Order Ready',
+        description: 'Packaged and waiting in dispatch zone',
+        actor: 'Warehouse Staff',
+        timestamp: '2026-09-15T12:00:00Z',
+      },
+      {
+        id: 'evt-10026-1',
+        orderId: 'order-10026',
+        action: 'ORDER_CREATED',
+        title: 'Order Created',
+        description: 'Pre-sale order O00026 created. Total: $47.00, Advance: $10.00',
+        actor: 'Admin',
+        timestamp: '2026-09-15T11:15:00Z',
+      },
+    ],
     createdAt: '2026-09-15T11:15:00Z',
+    updatedAt: '2026-09-15T12:00:00Z',
   },
   {
     id: 'order-10025',
@@ -1002,9 +1105,12 @@ const INITIAL_ORDERS: Order[] = [
       {
         productId: 'prod-7',
         productName: 'Fast GaN Charger 65W Dual Port',
+        sku: 'TECH-CHG-65W',
+        imageUrl: 'https://images.unsplash.com/photo-1583863788434-e58a36330cf0?w=150&auto=format&fit=crop&q=60',
         quantity: 1,
         costPrice: 14.00,
         sellingPrice: 22.00,
+        discount: 0,
         total: 22.00,
       },
     ],
@@ -1012,14 +1118,45 @@ const INITIAL_ORDERS: Order[] = [
     discount: 0,
     deliveryFee: 0,
     cargoFee: 15.00,
+    deliveryFeePayer: 'Customer',
     total: 37.00,
     paidAmount: 37.00,
     advanceAmount: 37.00,
+    paymentType: 'full_payment',
+    paymentMethod: 'Jeeb',
+    paymentProvider: 'Jeeb Mobile',
+    paymentStatus: 'verified',
+    paymentVerificationReference: 'JB-778103',
+    paymentVerifiedAt: '2026-09-14T14:45:00Z',
+    paymentVerifiedBy: 'Admin',
+    allocation: {
+      deliveryFee: 15.00,
+      deliveryCovered: 15.00,
+      remainingDelivery: 0,
+      productCovered: 22.00,
+      remainingProduct: 0,
+      feePayer: 'Customer',
+    },
     fulfillmentType: 'Cargo',
     cargoCompany: 'Bakaara Express Cargo',
+    cargoRegion: 'Bay',
+    cargoDestination: 'Baidoa Main Branch',
     status: 'confirmed',
+    portalToken: 'cpt_4d5e6f7a8b9c089f3b1e7c2a',
     notes: 'Send to Baidoa Office',
+    events: [
+      {
+        id: 'evt-10025-1',
+        orderId: 'order-10025',
+        action: 'ORDER_CREATED',
+        title: 'Order Created',
+        description: 'Cargo order O00025 created with full advance payment of $37.00',
+        actor: 'Admin',
+        timestamp: '2026-09-14T14:40:00Z',
+      },
+    ],
     createdAt: '2026-09-14T14:40:00Z',
+    updatedAt: '2026-09-14T14:45:00Z',
   },
   {
     id: 'order-10024',
@@ -1033,9 +1170,12 @@ const INITIAL_ORDERS: Order[] = [
       {
         productId: 'prod-1',
         productName: 'Coca-Cola 330ml Can',
+        sku: 'BEV-COCA-330',
+        imageUrl: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=150&auto=format&fit=crop&q=60',
         quantity: 12,
         costPrice: 0.85,
         sellingPrice: 1.25,
+        discount: 0,
         total: 15.00,
       },
     ],
@@ -1046,11 +1186,44 @@ const INITIAL_ORDERS: Order[] = [
     total: 15.00,
     paidAmount: 15.00,
     advanceAmount: 15.00,
+    paymentType: 'full_payment',
+    paymentMethod: 'Cash',
+    paymentStatus: 'verified',
+    allocation: {
+      deliveryFee: 0,
+      deliveryCovered: 0,
+      remainingDelivery: 0,
+      productCovered: 15.00,
+      remainingProduct: 0,
+      feePayer: 'Customer',
+    },
     fulfillmentType: 'Pickup',
     status: 'converted',
     convertedSaleId: 'sale-10033',
+    portalToken: 'cpt_5e6f7a8b9c089f3b1e7c2a4d',
     notes: 'Walk-in collection',
+    events: [
+      {
+        id: 'evt-10024-2',
+        orderId: 'order-10024',
+        action: 'CONVERTED_TO_SALE',
+        title: 'Converted to Sale',
+        description: 'Converted into sale invoice INV-10033 upon pickup',
+        actor: 'Cashier 1',
+        timestamp: '2026-09-14T10:15:00Z',
+      },
+      {
+        id: 'evt-10024-1',
+        orderId: 'order-10024',
+        action: 'ORDER_CREATED',
+        title: 'Order Created',
+        description: 'Pre-sale order O00024 created for pickup',
+        actor: 'Cashier 1',
+        timestamp: '2026-09-14T10:00:00Z',
+      },
+    ],
     createdAt: '2026-09-14T07:00:00Z',
+    updatedAt: '2026-09-14T10:15:00Z',
   },
 ];
 
@@ -1484,26 +1657,129 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const createOrder = (orderData: Omit<Order, 'id' | 'orderNo' | 'createdAt'>): Order => {
-    const nextNum = orders.length + 28;
+    // 1. Authoritative sequential, collision-safe Order ID (e.g. O00028)
+    let maxNum = 0;
+    orders.forEach((o) => {
+      const match = o.orderNo?.match(/^O(\d+)$/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (val > maxNum) maxNum = val;
+      }
+    });
+    const nextNum = maxNum + 1;
     const orderNo = `O${String(nextNum).padStart(5, '0')}`;
-    const id = `order-${Date.now()}`;
+    const id = `order-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const now = new Date().toISOString();
+
+    // 2. Cryptographic non-guessable portal token
+    const tokenArr = new Uint8Array(16);
+    crypto.getRandomValues(tokenArr);
+    const portalToken = 'cpt_' + Array.from(tokenArr).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+    // 3. Advance / Hormaris Allocation calculation
+    const deliveryFeePayer = orderData.deliveryFeePayer || 'Customer';
+    const feeOwedByCustomer = deliveryFeePayer === 'Customer'
+      ? (orderData.fulfillmentType === 'Delivery' ? (orderData.deliveryFee || 0) : (orderData.cargoFee || 0))
+      : 0;
+    const advance = orderData.paidAmount || orderData.advanceAmount || 0;
+    const deliveryCovered = Math.min(feeOwedByCustomer, advance);
+    const remainingDelivery = Math.max(0, feeOwedByCustomer - deliveryCovered);
+    const leftoverForProduct = Math.max(0, advance - deliveryCovered);
+    const subtotalAfterDiscount = Math.max(0, (orderData.subtotal || 0) - (orderData.discount || 0));
+    const productCovered = Math.min(subtotalAfterDiscount, leftoverForProduct);
+    const remainingProduct = Math.max(0, subtotalAfterDiscount - productCovered);
+
+    const initialEvent: OrderEvent = {
+      id: `evt-${Date.now()}-1`,
+      orderId: id,
+      action: 'ORDER_CREATED',
+      title: 'Order Created',
+      description: `Pre-sale order ${orderNo} registered for ${orderData.customerName}. Subtotal: $${(orderData.subtotal || 0).toFixed(2)}, Advance: $${advance.toFixed(2)} (${orderData.fulfillmentType})`,
+      actor: currentUser.name || 'Admin',
+      timestamp: now,
+    };
+
     const newOrder: Order = {
       ...orderData,
       id,
       orderNo,
-      createdAt: new Date().toISOString(),
+      portalToken,
+      deliveryFeePayer,
+      paymentStatus: orderData.paymentStatus || (advance >= orderData.total ? 'verified' : advance > 0 ? 'partially_paid' : 'unpaid'),
+      allocation: {
+        deliveryFee: feeOwedByCustomer,
+        deliveryCovered,
+        remainingDelivery,
+        productCovered,
+        remainingProduct,
+        feePayer: deliveryFeePayer,
+      },
+      events: [initialEvent],
+      createdAt: now,
+      updatedAt: now,
     };
+
     setOrders((prev) => [newOrder, ...prev]);
-    addAuditLog('CREATE_ORDER', orderNo, `Created order for ${newOrder.customerName} - Total $${newOrder.total.toFixed(2)} (${newOrder.fulfillmentType})`);
+    addAuditLog(
+      'CREATE_ORDER',
+      orderNo,
+      `Created order for ${newOrder.customerName} - Total: $${newOrder.total.toFixed(2)}, Advance: $${advance.toFixed(2)} (${newOrder.fulfillmentType})`
+    );
+
     return newOrder;
   };
 
-  const updateOrderStatus = (orderId: string, status: Order['status']) => {
+  const updateOrder = (orderId: string, updates: Partial<Order>, note?: string) => {
+    const now = new Date().toISOString();
     setOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId) {
+          const newEvent: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'ORDER_UPDATED',
+            title: 'Order Updated',
+            description: note || 'Order details modified',
+            actor: currentUser.name || 'Admin',
+            timestamp: now,
+            note,
+          };
+          return {
+            ...ord,
+            ...updates,
+            events: [newEvent, ...(ord.events || [])],
+            updatedAt: now,
+          };
+        }
+        return ord;
+      })
+    );
+    addAuditLog('UPDATE_ORDER', orderId, note || 'Updated order details');
+  };
+
+  const updateOrderStatus = (orderId: string, status: Order['status']) => {
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((ord) => {
+        if (ord.id === orderId) {
+          const newEvent: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'STATUS_CHANGED',
+            title: 'Status Updated',
+            description: `Status transitioned from ${ord.status} to ${status}`,
+            actor: currentUser.name || 'Staff',
+            oldValue: ord.status,
+            newValue: status,
+            timestamp: now,
+          };
           addAuditLog('UPDATE_ORDER_STATUS', ord.orderNo, `Status changed from ${ord.status} to ${status}`);
-          return { ...ord, status };
+          return {
+            ...ord,
+            status,
+            events: [newEvent, ...(ord.events || [])],
+            updatedAt: now,
+          };
         }
         return ord;
       })
@@ -1549,7 +1825,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         order.items.reduce((s, i) => s + i.costPrice * i.quantity, 0),
       amountPaid: order.paidAmount,
       remainingBalance: Math.max(0, order.total - order.paidAmount),
-      paymentMethod: 'EVC Plus',
+      paymentMethod: (order.paymentMethod as any) || 'EVC Plus',
       paymentStatus:
         order.paidAmount >= order.total
           ? 'full_paid'
@@ -1566,28 +1842,128 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       notes: `Converted from Order ${order.orderNo}.${order.deliveryAddress ? ` Address: ${order.deliveryAddress}.` : ''} ${order.notes || ''}`.trim(),
     });
 
+    const now = new Date().toISOString();
+    const convertedEvent: OrderEvent = {
+      id: `evt-${Date.now()}`,
+      orderId: order.id,
+      action: 'CONVERTED_TO_SALE',
+      title: 'Converted to Sale',
+      description: `Officially converted to sales invoice ${newSale.invoiceNo}`,
+      actor: currentUser.name || 'Staff',
+      timestamp: now,
+      note: `Invoice: ${newSale.invoiceNo}`,
+    };
+
     setOrders((prev) =>
       prev.map((o) =>
-        o.id === orderId ? { ...o, status: 'converted', convertedSaleId: newSale.id } : o
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'converted',
+              convertedSaleId: newSale.id,
+              events: [convertedEvent, ...(o.events || [])],
+              updatedAt: now,
+            }
+          : o
       )
     );
     addAuditLog('CONVERT_ORDER_TO_SALE', order.orderNo, `Converted into sale invoice ${newSale.invoiceNo}`);
     return newSale;
   };
 
-  const recordOrderPayment = (orderId: string, amount: number, paymentMethod = 'EVC Plus') => {
+  const recordOrderPayment = (
+    orderId: string,
+    amount: number,
+    paymentMethod = 'EVC Plus',
+    paymentProvider?: string,
+    referenceNo?: string
+  ) => {
+    const now = new Date().toISOString();
     setOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId) {
           const newPaid = Math.min(ord.total, ord.paidAmount + amount);
           const remaining = Math.max(0, ord.total - newPaid);
           const newStatus = ord.status === 'pending' ? 'confirmed' : ord.status;
+          const newPaymentStatus: OrderPaymentStatus = newPaid >= ord.total ? 'verified' : 'partially_paid';
+
+          // Recalculate advance allocation
+          const feeOwed = (ord.deliveryFeePayer || 'Customer') === 'Customer'
+            ? (ord.fulfillmentType === 'Delivery' ? ord.deliveryFee : ord.cargoFee)
+            : 0;
+          const deliveryCovered = Math.min(feeOwed, newPaid);
+          const remainingDelivery = Math.max(0, feeOwed - deliveryCovered);
+          const leftoverForProduct = Math.max(0, newPaid - deliveryCovered);
+          const subtotalAfterDiscount = Math.max(0, ord.subtotal - ord.discount);
+          const productCovered = Math.min(subtotalAfterDiscount, leftoverForProduct);
+          const remainingProduct = Math.max(0, subtotalAfterDiscount - productCovered);
+
+          const payEvent: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'PAYMENT_RECEIVED',
+            title: 'Payment Received',
+            description: `Received $${amount.toFixed(2)} via ${paymentMethod}${paymentProvider ? ` (${paymentProvider})` : ''}${referenceNo ? ` Ref: ${referenceNo}` : ''}. Remaining: $${remaining.toFixed(2)}`,
+            actor: currentUser.name || 'Staff',
+            timestamp: now,
+            note: referenceNo,
+          };
+
           addAuditLog(
             'ORDER_PAYMENT',
             ord.orderNo,
             `Paid $${amount.toFixed(2)} via ${paymentMethod}. Remaining: $${remaining.toFixed(2)}`
           );
-          return { ...ord, paidAmount: newPaid, status: newStatus };
+
+          return {
+            ...ord,
+            paidAmount: newPaid,
+            status: newStatus,
+            paymentMethod,
+            paymentProvider: paymentProvider || ord.paymentProvider,
+            paymentStatus: newPaymentStatus,
+            allocation: {
+              deliveryFee: feeOwed,
+              deliveryCovered,
+              remainingDelivery,
+              productCovered,
+              remainingProduct,
+              feePayer: ord.deliveryFeePayer || 'Customer',
+            },
+            events: [payEvent, ...(ord.events || [])],
+            updatedAt: now,
+          };
+        }
+        return ord;
+      })
+    );
+  };
+
+  const verifyOrderPayment = (orderId: string, referenceNo?: string) => {
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((ord) => {
+        if (ord.id === orderId) {
+          const verifyEvent: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'PAYMENT_VERIFIED',
+            title: 'Payment Verified',
+            description: `Payment of $${ord.paidAmount.toFixed(2)} verified by ${currentUser.name || 'Staff'}${referenceNo ? ` [Ref: ${referenceNo}]` : ''}`,
+            actor: currentUser.name || 'Staff',
+            timestamp: now,
+            note: referenceNo,
+          };
+          addAuditLog('VERIFY_ORDER_PAYMENT', ord.orderNo, `Payment of $${ord.paidAmount.toFixed(2)} verified`);
+          return {
+            ...ord,
+            paymentStatus: 'verified',
+            paymentVerifiedAt: now,
+            paymentVerifiedBy: currentUser.name || 'Staff',
+            paymentVerificationReference: referenceNo || ord.paymentVerificationReference,
+            events: [verifyEvent, ...(ord.events || [])],
+            updatedAt: now,
+          };
         }
         return ord;
       })
@@ -1595,9 +1971,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const cancelOrder = (orderId: string, reason?: string) => {
+    const now = new Date().toISOString();
     setOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId) {
+          const cancelEvent: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'ORDER_CANCELLED',
+            title: 'Order Cancelled',
+            description: `Order cancelled. Reason: ${reason || 'Customer request'}`,
+            actor: currentUser.name || 'Staff',
+            timestamp: now,
+            note: reason,
+          };
           addAuditLog(
             'CANCEL_ORDER',
             ord.orderNo,
@@ -1607,11 +1994,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ...ord,
             status: 'cancelled',
             notes: `${ord.notes ? ord.notes + ' | ' : ''}Cancelled: ${reason || 'Customer request'}`,
+            events: [cancelEvent, ...(ord.events || [])],
+            updatedAt: now,
           };
         }
         return ord;
       })
     );
+  };
+
+  const getOrderByPortalToken = (token: string): Order | null => {
+    if (!token) return null;
+    return orders.find((o) => o.portalToken === token || o.id === token) || null;
+  };
+
+  const generateCustomerPortalUrl = (order: Order): string => {
+    const token = order.portalToken || order.id;
+    return `${window.location.origin}?portal_token=${encodeURIComponent(token)}`;
   };
 
   const factoryReset = (confirmCode: string = 'RESET', overrideRole?: string): boolean => {
@@ -2165,6 +2564,26 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     setCustomers((prev) => [...prev, newCust]);
     return newCust;
+  };
+
+  const checkDuplicateCustomer = (name: string, phone?: string): Customer | null => {
+    const cleanName = name.trim().toLowerCase();
+    const cleanPhone = phone ? phone.trim().replace(/[\s\-\(\)]/g, '') : '';
+
+    return (
+      customers.find((c) => {
+        if (cleanPhone && cleanPhone.length >= 6 && c.phone) {
+          const cPhone = c.phone.trim().replace(/[\s\-\(\)]/g, '');
+          if (cPhone === cleanPhone || cPhone.endsWith(cleanPhone) || cleanPhone.endsWith(cPhone)) {
+            return true;
+          }
+        }
+        if (cleanName && c.name.trim().toLowerCase() === cleanName) {
+          return true;
+        }
+        return false;
+      }) || null
+    );
   };
 
   const updateCustomer = (id: string, updates: Partial<Customer>) => {
@@ -2999,10 +3418,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         switchPortal,
         createSale,
         createOrder,
+        updateOrder,
         updateOrderStatus,
         convertOrderToSale,
         recordOrderPayment,
+        verifyOrderPayment,
         cancelOrder,
+        getOrderByPortalToken,
+        generateCustomerPortalUrl,
         processReturn,
         addProduct,
         updateProduct,
@@ -3021,6 +3444,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addUnit,
         addCustomer,
         updateCustomer,
+        checkDuplicateCustomer,
         receiveCustomerPayment,
         addDriver,
         updateDriver,
