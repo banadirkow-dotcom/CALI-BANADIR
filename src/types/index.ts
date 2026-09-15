@@ -16,11 +16,53 @@ export interface ProductCategory {
   name: string;
   icon?: string;
   description?: string;
+  isActive?: boolean;
 }
 
 export interface ProductBrand {
   id: string;
   name: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface ProductUnit {
+  id: string;
+  name: string;
+  symbol: string;
+}
+
+export interface CostLayer {
+  id: string;
+  date: string;
+  quantity: number;
+  remainingQuantity: number;
+  costPrice: number;
+  sellingPrice: number;
+  source: 'initial' | 'purchase' | 'adjustment';
+  referenceNo?: string;
+  notes?: string;
+}
+
+export interface PriceHistoryRecord {
+  id: string;
+  date: string;
+  oldCost: number;
+  newCost: number;
+  oldSelling: number;
+  newSelling: number;
+  actor: string;
+  reason?: string;
+}
+
+export interface ProductHistoryEvent {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: string;
+  oldValue?: string;
+  newValue?: string;
+  details?: string;
 }
 
 export interface Product {
@@ -38,7 +80,15 @@ export interface Product {
   imageUrl?: string;
   unit: string;
   isActive: boolean;
+  isArchived?: boolean;
+  description?: string;
+  specifications?: string;
+  notes?: string;
+  costLayers?: CostLayer[];
+  priceHistory?: PriceHistoryRecord[];
+  history?: ProductHistoryEvent[];
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Customer {
@@ -57,11 +107,52 @@ export interface Customer {
 export interface Supplier {
   id: string;
   name: string;
+  company?: string;
   contactPerson?: string;
   phone: string;
   email?: string;
   address?: string;
-  balance: number; // What we owe them
+  notes?: string;
+  balance: number; // What we owe them (Accounts Payable)
+  totalPurchases: number;
+  totalPaid: number;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface SupplierPayment {
+  id: string;
+  paymentNo: string;
+  supplierId: string;
+  supplierName: string;
+  purchaseId?: string;
+  purchaseNo?: string;
+  date: string;
+  time: string;
+  amount: number;
+  paymentMethod: string;
+  accountId: string;
+  accountName: string;
+  referenceNo?: string;
+  notes?: string;
+  actor: string;
+  createdAt: string;
+}
+
+export interface SupplierStatementEntry {
+  id: string;
+  date: string;
+  type: 'purchase' | 'payment' | 'adjustment' | 'reversal';
+  referenceNo: string;
+  description: string;
+  debit: number; // Purchase increases debt
+  credit: number; // Payment decreases debt
+  runningBalance: number;
+  paymentMethod?: string;
+  accountName?: string;
+  actor: string;
+  notes?: string;
 }
 
 export type FulfillmentType = 'Pickup' | 'Delivery' | 'Cargo';
@@ -234,24 +325,44 @@ export interface Income {
 export interface PurchaseItem {
   productId: string;
   productName: string;
+  sku?: string;
+  imageUrl?: string;
   quantity: number;
-  unitCost: number;
+  unit: string;
+  costPrice: number;
+  sellingPrice?: number;
+  discount?: number;
   total: number;
 }
 
+export type PurchasePaymentStatus = 'full_paid' | 'partial_payment' | 'credit';
+
 export interface Purchase {
   id: string;
-  purchaseNo: string;
-  supplierId?: string;
-  supplierName: string;
+  purchaseNo: string; // Sequential: PU00001, PU00002...
   date: string;
+  time?: string;
+  supplierId: string;
+  supplierName: string;
+  supplierPhone?: string;
   items: PurchaseItem[];
+  subtotal: number;
+  discount: number;
+  discountType?: 'fixed' | 'percent';
   totalAmount: number;
   paidAmount: number;
+  supplierBalance: number; // Outstanding amount on this purchase
+  paymentStatus: PurchasePaymentStatus;
   paymentMethod?: string;
   accountId?: string;
   accountName?: string;
-  status: 'Received' | 'Pending' | 'Ordered';
+  receiptUrl?: string;
+  receiptFileName?: string;
+  status: 'Received' | 'Pending' | 'Ordered' | 'Cancelled';
+  notes?: string;
+  actor?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface StoreSettings {
@@ -316,6 +427,9 @@ export interface InventoryMovement {
   type: 'opening' | 'purchase' | 'sale' | 'return_in' | 'return_out' | 'adjustment' | 'damage' | 'loss' | 'transfer';
   quantityChange: number;
   stockAfter: number;
+  costPrice?: number;
+  sellingPrice?: number;
+  unit?: string;
   referenceNo?: string;
   reason?: string;
   actor: string;

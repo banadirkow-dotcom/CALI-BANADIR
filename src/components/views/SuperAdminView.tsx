@@ -60,7 +60,7 @@ export const SuperAdminView: React.FC = () => {
       const matchSearch =
         log.action.toLowerCase().includes(auditSearch.toLowerCase()) ||
         log.target.toLowerCase().includes(auditSearch.toLowerCase()) ||
-        log.details.toLowerCase().includes(auditSearch.toLowerCase()) ||
+        (log.details?.toLowerCase().includes(auditSearch.toLowerCase()) ?? false) ||
         log.actor.toLowerCase().includes(auditSearch.toLowerCase());
 
       const matchFilter = auditFilter === 'ALL' || log.portal === auditFilter;
@@ -97,7 +97,7 @@ export const SuperAdminView: React.FC = () => {
       alert('Furaha sirta ah (Password) waa qalad! Fadlan isticmaal 123456.');
       return;
     }
-    factoryReset();
+    factoryReset(resetPassword);
     setShowResetConfirm(false);
     setResetPassword('');
     setResetMessage('Nidaamka si buuxda ayaa dib loogu celiyay bilowgii (Factory Reset Complete).');

@@ -144,7 +144,9 @@ const MainApp: React.FC = () => {
 
           {activeTab === 'inventory' && <InventoryView />}
 
-          {activeTab === 'purchases' && <PurchasesView />}
+          {activeTab === 'purchases' && <PurchasesView initialTab="purchases" />}
+
+          {activeTab === 'suppliers' && <PurchasesView initialTab="suppliers" />}
 
           {activeTab === 'expenses' && (
             <ExpensesView onOpenNewExpense={() => setIsNewExpenseOpen(true)} />

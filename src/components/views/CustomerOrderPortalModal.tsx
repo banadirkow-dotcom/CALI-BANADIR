@@ -95,7 +95,8 @@ export const CustomerOrderPortalModal: React.FC<CustomerOrderPortalModalProps> =
     const text = encodeURIComponent(
       `Salaan! Waa dalabkaaga Banadir Store:\nOrder No: ${order.orderNo}\nTotal: $${order.total.toFixed(2)}\nBixiyay: $${order.paidAmount.toFixed(2)}\nHadhaa: $${remaining.toFixed(2)}\nFadlan la socodka dalabka ama bixinta isticmaal: ${window.location.origin}`
     );
-    window.open(`https://wa.me/${order.customerPhone.replace(/[^0-9]/g, '')}?text=${text}`, '_blank');
+    const phoneDigits = (order.customerPhone || '').replace(/[^0-9]/g, '');
+    window.open(`https://wa.me/${phoneDigits}?text=${text}`, '_blank');
   };
 
   const handlePrint = () => {

@@ -67,8 +67,8 @@ export const DeliveryPortalView: React.FC = () => {
     updateDeliveryStatus(deliveryId, 'In Transit');
   };
 
-  const handleCompleteDelivery = (deliveryId: string, cashToCollect: number) => {
-    updateDeliveryStatus(deliveryId, 'Delivered', cashToCollect);
+  const handleCompleteDelivery = (deliveryId: string, _cashToCollect: number) => {
+    updateDeliveryStatus(deliveryId, 'Delivered', currentDriver.id);
   };
 
   const handleExecuteHandover = (e: React.FormEvent) => {

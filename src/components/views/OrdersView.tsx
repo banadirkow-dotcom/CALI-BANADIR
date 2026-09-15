@@ -54,7 +54,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({ onConvertSale }) => {
       const matchSearch =
         order.orderNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customerPhone.includes(searchTerm);
+        Boolean(order.customerPhone && order.customerPhone.includes(searchTerm));
 
       const matchStatus = statusFilter === 'all' || order.status === statusFilter;
       const matchFulfillment = fulfillmentFilter === 'all' || order.fulfillmentType === fulfillmentFilter;
