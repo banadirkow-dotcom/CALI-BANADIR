@@ -16,10 +16,15 @@ import {
   X,
   ArrowUpRight,
   ArrowDownRight,
+  Upload,
+  Trash2,
+  Camera,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Product } from '../../types';
 import { useStore } from '../../context/StoreContext';
+import { validateImageFile, compressImageFile } from '../../utils/imageUtils';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -43,6 +48,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [editSelling, setEditSelling] = useState('');
   const [editMinStock, setEditMinStock] = useState('');
   const [editCategory, setEditCategory] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+  const imageInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (product) {
@@ -51,10 +59,36 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       setEditMinStock(product.minStockLevel.toString());
       setEditCategory(product.category);
       setIsEditing(false);
+      setImageUploadError(null);
     }
   }, [product]);
 
   if (!product) return null;
+
+  const handleImageFile = async (file: File) => {
+    setImageUploadError(null);
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      setImageUploadError(validation.error || 'Invalid file');
+      return;
+    }
+
+    try {
+      setIsUploadingImage(true);
+      const compressed = await compressImageFile(file, 800, 800, 0.82);
+      updateProduct(product.id, { imageUrl: compressed }, 'Updated canonical product image');
+    } catch {
+      setImageUploadError('Failed to process image');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    if (confirm('Remove product image?')) {
+      updateProduct(product.id, { imageUrl: '' }, 'Removed product image');
+    }
+  };
 
   const productMovements = inventoryMovements.filter((m) => m.productId === product.id);
   const isLow = product.stock > 0 && product.stock <= product.minStockLevel;
@@ -116,19 +150,58 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       <div className="space-y-4">
         {/* Top Summary Card */}
         <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {product.imageUrl ? (
-              <img
-                src={product.imageUrl}
-                alt={product.name}
-                referrerPolicy="no-referrer"
-                className="w-14 h-14 rounded-xl object-contain bg-white border border-slate-200 p-1 shrink-0"
+          <div className="flex items-center gap-3.5">
+            <div className="relative group shrink-0">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && handleImageFile(e.target.files[0])}
               />
-            ) : (
-              <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                <Package className="w-7 h-7" />
-              </div>
-            )}
+              {product.imageUrl ? (
+                <div className="relative w-16 h-16 rounded-xl overflow-hidden bg-white border border-slate-200 p-1">
+                  <img
+                    src={product.imageUrl}
+                    alt={product.name}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-contain"
+                  />
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-white text-[10px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      className="hover:underline flex items-center gap-0.5"
+                    >
+                      <Camera className="w-3 h-3" /> Change
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveImage}
+                      className="text-rose-300 hover:text-rose-100 flex items-center gap-0.5"
+                    >
+                      <Trash2 className="w-2.5 h-2.5" /> Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  className="w-16 h-16 rounded-xl bg-white border-2 border-dashed border-slate-300 hover:border-indigo-400 flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition-colors"
+                  title="Upload Product Image"
+                >
+                  <Upload className="w-5 h-5 mb-0.5" />
+                  <span className="text-[9px] font-bold">Add Photo</span>
+                </button>
+              )}
+              {isUploadingImage && (
+                <div className="absolute inset-0 bg-white/80 rounded-xl flex items-center justify-center">
+                  <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+            </div>
+
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-mono font-black text-slate-900 text-sm bg-white px-2 py-0.5 rounded border border-slate-200">
@@ -142,6 +215,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <p className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
                   <Barcode className="w-3.5 h-3.5" /> {product.barcode}
                 </p>
+              )}
+              {imageUploadError && (
+                <p className="text-[11px] text-rose-600 font-semibold">{imageUploadError}</p>
               )}
             </div>
           </div>

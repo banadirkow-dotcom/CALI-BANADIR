@@ -12,10 +12,14 @@ import {
   Calendar,
   X,
   CheckCircle2,
+  Paperclip,
+  Upload,
+  FileText,
+  Tag,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Modal } from '../common/Modal';
-import { PurchaseItem } from '../../types';
+import { PurchaseItem, PurchaseAttachment } from '../../types';
 
 interface NewPurchaseModalProps {
   isOpen: boolean;
@@ -71,7 +75,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   const [paymentType, setPaymentType] = useState<'full' | 'partial' | 'credit'>('full');
   const [partialAmount, setPartialAmount] = useState<string>('');
   const [accountId, setAccountId] = useState<string>(accounts[0]?.id || '');
+  const [paymentProvider, setPaymentProvider] = useState<string>('');
+  const [referenceNo, setReferenceNo] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+  const [attachments, setAttachments] = useState<PurchaseAttachment[]>([]);
+  const [uploadCategory, setUploadCategory] = useState<'invoice' | 'receipt' | 'waybill' | 'other'>('invoice');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   // Calculations
@@ -108,6 +116,37 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
   const supplierBalance = Math.max(0, parseFloat((totalAmount - paidAmount).toFixed(2)));
   const selectedAccount = accounts.find((a) => a.id === accountId);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        const base64Url = uploadEvent.target?.result as string;
+        const newAttachment: PurchaseAttachment = {
+          id: `att-draft-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          name: file.name,
+          category: uploadCategory,
+          fileUrl: base64Url,
+          fileType: file.type || 'application/octet-stream',
+          sizeBytes: file.size,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: 'Purchasing Officer',
+        };
+        setAttachments((prev) => [...prev, newAttachment]);
+      };
+      reader.readAsDataURL(file);
+    }
+    // Reset file input value
+    e.target.value = '';
+  };
+
+  const handleRemoveAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
 
   const handleAddItem = () => {
     const defaultProd = products[0];
@@ -250,8 +289,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
         paymentStatus:
           paidAmount >= totalAmount ? 'full_paid' : paidAmount > 0 ? 'partial_payment' : 'credit',
         paymentMethod: paidAmount > 0 ? selectedAccount?.name : 'Supplier Credit',
+        paymentProvider: paymentProvider.trim() || (paidAmount > 0 ? selectedAccount?.name : undefined),
         accountId: paidAmount > 0 ? selectedAccount?.id : undefined,
         accountName: paidAmount > 0 ? selectedAccount?.name : undefined,
+        referenceNo: referenceNo.trim() || undefined,
+        attachments: attachments,
         status: 'Received',
         notes: notes.trim() || undefined,
       });
@@ -599,7 +641,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             )}
 
             {paymentType !== 'credit' && (
-              <div className={paymentType === 'partial' ? '' : 'sm:col-span-2'}>
+              <div>
                 <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                   Pay From Commercial Account *
                 </label>
@@ -622,10 +664,38 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                 )}
               </div>
             )}
+
+            {paymentType !== 'credit' && (
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Payment Method / Provider
+                </label>
+                <input
+                  type="text"
+                  value={paymentProvider}
+                  onChange={(e) => setPaymentProvider(e.target.value)}
+                  placeholder="e.g. Bank Wire, EVC Plus, Cheque #091"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
+                />
+              </div>
+            )}
           </div>
 
-          {/* Discounts and Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          {/* Reference Number & Discounts */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                Supplier Invoice / Ref #
+              </label>
+              <input
+                type="text"
+                value={referenceNo}
+                onChange={(e) => setReferenceNo(e.target.value)}
+                placeholder="e.g. INV-2026-9901"
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
+              />
+            </div>
+
             <div>
               <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                 Supplier Discount ($)
@@ -653,6 +723,73 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
               />
             </div>
+          </div>
+
+          {/* Attachments Section */}
+          <div className="pt-2 border-t border-slate-200/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Paperclip className="w-3.5 h-3.5 text-slate-600" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                  Document Attachments & Receipts ({attachments.length})
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={uploadCategory}
+                  onChange={(e) => setUploadCategory(e.target.value as any)}
+                  className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700"
+                >
+                  <option value="invoice">Supplier Invoice</option>
+                  <option value="receipt">Payment Receipt</option>
+                  <option value="waybill">Waybill / Delivery Note</option>
+                  <option value="other">Other Document</option>
+                </select>
+                <label className="cursor-pointer px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors">
+                  <Upload className="w-3 h-3" />
+                  <span>Upload File</span>
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    accept="image/*,.pdf,.doc,.docx"
+                    multiple
+                  />
+                </label>
+              </div>
+            </div>
+
+            {attachments.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-200 text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-800 truncate text-[11px]">{att.name}</p>
+                        <span className="text-[9px] uppercase font-bold text-slate-400">
+                          {att.category} • {att.sizeBytes ? `${Math.round(att.sizeBytes / 1024)} KB` : 'Attached'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(att.id)}
+                      className="text-slate-400 hover:text-rose-600 p-1 transition-colors shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400 italic">
+                Optional: Attach invoice photos, bank slips, or customs clearance docs.
+              </p>
+            )}
           </div>
 
           {/* Breakdown summary */}

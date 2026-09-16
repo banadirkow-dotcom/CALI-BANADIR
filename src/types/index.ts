@@ -197,6 +197,8 @@ export interface Sale {
   driverName?: string;
   cargoCompany?: string;
   trackingNumber?: string;
+  orderId?: string;
+  orderNo?: string;
   notes?: string;
   status: SaleStatus;
   cashierName: string;
@@ -337,6 +339,28 @@ export interface PurchaseItem {
 
 export type PurchasePaymentStatus = 'full_paid' | 'partial_payment' | 'credit';
 
+export interface PurchaseAttachment {
+  id: string;
+  name: string;
+  size?: number;
+  sizeBytes?: number;
+  type?: string; // e.g., 'image/jpeg', 'application/pdf'
+  fileType?: string;
+  dataUrl?: string; // base64 / blob URL representation
+  fileUrl?: string;
+  category: 'receipt' | 'invoice' | 'supplier_doc' | 'payment_evidence' | 'waybill' | 'other';
+  uploadedAt: string;
+  uploadedBy: string;
+}
+
+export interface PurchaseAuditEvent {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: 'CREATED' | 'UPDATED' | 'CANCELLED' | 'PAYMENT_ADDED' | 'ATTACHMENT_ADDED' | 'ATTACHMENT_REMOVED';
+  details: string;
+}
+
 export interface Purchase {
   id: string;
   purchaseNo: string; // Sequential: PU00001, PU00002...
@@ -354,10 +378,14 @@ export interface Purchase {
   supplierBalance: number; // Outstanding amount on this purchase
   paymentStatus: PurchasePaymentStatus;
   paymentMethod?: string;
+  paymentProvider?: string; // e.g. 'Hormuud', 'Premier Bank', 'Dahabshiil', 'Somtel'
   accountId?: string;
   accountName?: string;
+  referenceNo?: string;
   receiptUrl?: string;
   receiptFileName?: string;
+  attachments?: PurchaseAttachment[];
+  history?: PurchaseAuditEvent[];
   status: 'Received' | 'Pending' | 'Ordered' | 'Cancelled';
   notes?: string;
   actor?: string;
@@ -384,17 +412,49 @@ export interface StoreSettings {
 export type SystemPortal = 'super_admin' | 'delivery' | 'banadir';
 
 export type OrderLifecycleStatus =
+  | 'DRAFT'
+  | 'CONFIRMED'
+  | 'PAYMENT_PENDING'
+  | 'PARTIALLY_PAID'
+  | 'PAID'
+  | 'READY_FOR_FULFILLMENT'
+  | 'CONVERTED_TO_SALE'
+  | 'CANCELLED'
+  | 'EXPIRED'
   | 'draft'
   | 'confirmed'
   | 'payment_pending'
   | 'partially_paid'
   | 'paid'
   | 'ready'
+  | 'ready_for_fulfillment'
   | 'out_for_delivery'
   | 'delivered'
   | 'cancelled'
   | 'expired'
-  | 'converted';
+  | 'converted'
+  | 'converted_to_sale';
+
+export type OrderFulfillmentStatus =
+  | 'UNASSIGNED'
+  | 'ASSIGNED'
+  | 'PREPARING'
+  | 'READY'
+  | 'IN_TRANSIT'
+  | 'DELIVERED'
+  | 'CANCELLED'
+  | 'READY_FOR_PICKUP'
+  | 'PICKED_UP'
+  | 'WAYBILL_ISSUED'
+  | 'DISPATCHED_TO_CARGO'
+  | 'ARRIVED_AT_DESTINATION'
+  | 'unassigned'
+  | 'assigned'
+  | 'preparing'
+  | 'in_transit'
+  | 'delivered'
+  | 'ready_for_pickup'
+  | 'picked_up';
 
 export type OrderPaymentStatus =
   | 'unpaid'
@@ -463,15 +523,18 @@ export interface Order {
   paymentType?: 'full_payment' | 'partial_payment' | 'full_credit';
   paymentMethod?: string;
   paymentProvider?: string;
+  accountId?: string;
   paymentStatus?: OrderPaymentStatus;
   paymentVerificationReference?: string;
   paymentVerifiedAt?: string;
   paymentVerifiedBy?: string;
   fulfillmentType: FulfillmentType;
-  fulfillmentStatus?: string;
+  fulfillmentStatus?: OrderFulfillmentStatus | string;
   deliveryAddress?: string;
   deliveryDistrict?: string;
   deliveryZone?: string;
+  deliveryLocation?: string;
+  deliveryRate?: number;
   deliveryCompany?: string;
   driverId?: string;
   driverName?: string;
@@ -484,6 +547,7 @@ export interface Order {
   cargoPhone?: string;
   portalToken?: string;
   portalTokenExpiresAt?: string;
+  portalTokenRevoked?: boolean;
   status: OrderLifecycleStatus | 'pending' | 'confirmed' | 'ready' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'converted';
   convertedSaleId?: string;
   notes?: string;
@@ -583,4 +647,43 @@ export interface DriverHandover {
   accountId: string;
   status: 'pending' | 'verified' | 'settled';
   verifiedBy?: string;
+}
+
+export interface SystemBackupPoint {
+  id: string;
+  timestamp: string;
+  createdAt: string;
+  createdBy: string;
+  reason: string;
+  itemCounts: {
+    products: number;
+    customers: number;
+    suppliers: number;
+    sales: number;
+    purchases: number;
+    orders: number;
+    inventoryMovements: number;
+  };
+  snapshot: {
+    products: Product[];
+    customers: Customer[];
+    suppliers: Supplier[];
+    supplierPayments: SupplierPayment[];
+    sales: Sale[];
+    purchases: Purchase[];
+    orders: Order[];
+    returns: SaleReturn[];
+    drivers: Driver[];
+    deliveries: DeliveryRecord[];
+    cargoShipments: CargoShipment[];
+    expenses: Expense[];
+    incomes: Income[];
+    transfers: AccountTransfer[];
+    accounts: PaymentAccount[];
+    inventoryMovements: InventoryMovement[];
+    settings: StoreSettings;
+    categories: ProductCategory[];
+    brands: ProductBrand[];
+    units: ProductUnit[];
+  };
 }

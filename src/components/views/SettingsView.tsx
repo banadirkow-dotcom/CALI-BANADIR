@@ -19,7 +19,15 @@ import {
 import { useStore } from '../../context/StoreContext';
 
 export const SettingsView: React.FC = () => {
-  const { settings, updateSettings, currentUser, resetToDemoData, factoryReset } = useStore();
+  const {
+    settings,
+    updateSettings,
+    currentUser,
+    resetToDemoData,
+    factoryReset,
+    preResetBackup,
+    restorePreResetBackup,
+  } = useStore();
 
   const [storeName, setStoreName] = useState(settings.storeName);
   const [storeAddress, setStoreAddress] = useState(settings.storeAddress);
@@ -252,6 +260,28 @@ export const SettingsView: React.FC = () => {
             <li><strong className="text-slate-700">Preserves:</strong> Database schema, storage architecture, accounts definitions, user roles (RBAC/RLS), and general configuration.</li>
           </ul>
         </div>
+
+        {preResetBackup && (
+          <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+            <div>
+              <span className="font-bold text-indigo-950">Restore Point Available:</span>
+              <span className="text-indigo-800 ml-1.5 font-mono text-[11px]">{preResetBackup.createdAt}</span>
+              <span className="text-slate-500 ml-1 text-[11px]">({preResetBackup.itemCounts.products} items, {preResetBackup.itemCounts.sales} sales)</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Restore system snapshot from ${preResetBackup.createdAt}?`)) {
+                  restorePreResetBackup();
+                  alert('System state restored from pre-reset backup point.');
+                }
+              }}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs shrink-0 transition"
+            >
+              Restore Previous State
+            </button>
+          </div>
+        )}
 
         <div className="pt-2 flex flex-wrap items-center gap-3">
           <button

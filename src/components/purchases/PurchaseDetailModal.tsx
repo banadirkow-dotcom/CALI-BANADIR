@@ -13,9 +13,15 @@ import {
   FileText,
   DollarSign,
   User,
+  History,
+  Paperclip,
+  Upload,
+  Download,
+  Trash2,
+  ExternalLink,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
-import { Purchase } from '../../types';
+import { Purchase, PurchaseAttachment } from '../../types';
 import { useStore } from '../../context/StoreContext';
 
 interface PurchaseDetailModalProps {
@@ -31,16 +37,40 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
   onClose,
   onCancelled,
 }) => {
-  const { cancelPurchase, settings } = useStore();
+  const { cancelPurchase, addPurchaseAttachment, removePurchaseAttachment, settings } = useStore();
   const [isConfirmCancel, setIsConfirmCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('Damaged goods / Order rejected at dock');
   const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
   const [message, setMessage] = useState('');
+  const [activeTab, setActiveTab] = useState<'items' | 'history' | 'attachments'>('items');
+  const [newAttCategory, setNewAttCategory] = useState<'invoice' | 'receipt' | 'waybill' | 'other'>('receipt');
 
   if (!purchase) return null;
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !purchase) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        const base64Url = uploadEvent.target?.result as string;
+        addPurchaseAttachment(purchase.id, {
+          name: file.name,
+          category: newAttCategory,
+          fileUrl: base64Url,
+          fileType: file.type || 'application/octet-stream',
+          sizeBytes: file.size,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
   };
 
   const handleConfirmCancel = () => {
@@ -136,8 +166,15 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
             {purchase.supplierPhone && (
               <p className="text-slate-600 font-medium">{purchase.supplierPhone}</p>
             )}
-            {purchase.supplierId && (
-              <p className="text-[10px] text-slate-400 font-mono">ID: {purchase.supplierId}</p>
+            <div className="flex items-center justify-between text-[11px] pt-1 text-slate-500">
+              <span>Supplier ID:</span>
+              <span className="font-mono text-slate-700">{purchase.supplierId || 'N/A'}</span>
+            </div>
+            {purchase.referenceNo && (
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>Invoice / Ref No:</span>
+                <span className="font-mono font-bold text-slate-800">{purchase.referenceNo}</span>
+              </div>
             )}
           </div>
 
@@ -152,11 +189,17 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Paid Account:</span>
+              <span className="text-slate-500">Disbursement Account:</span>
               <span className="font-semibold text-slate-800">
                 {purchase.accountName || 'Commercial Account'}
               </span>
             </div>
+            {purchase.paymentProvider && (
+              <div className="flex justify-between">
+                <span className="text-slate-500">Payment Provider:</span>
+                <span className="font-semibold text-slate-800">{purchase.paymentProvider}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-slate-500">Recorded By:</span>
               <span className="font-semibold text-slate-800">{purchase.actor || 'Admin'}</span>
@@ -164,89 +207,279 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Itemized Table */}
-        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                <th className="py-2.5 px-3">Product Name</th>
-                <th className="py-2.5 px-3 text-center">Unit</th>
-                <th className="py-2.5 px-3 text-right">Quantity</th>
-                <th className="py-2.5 px-3 text-right">Unit Cost</th>
-                <th className="py-2.5 px-3 text-right">Selling Price</th>
-                <th className="py-2.5 px-3 text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {purchase.items.map((it, idx) => (
-                <tr key={idx} className="hover:bg-slate-50/50">
-                  <td className="py-2.5 px-3 font-semibold text-slate-900">
-                    <div>{it.productName}</div>
-                    {it.sku && <span className="text-[10px] text-slate-400 font-mono">SKU: {it.sku}</span>}
-                  </td>
-                  <td className="py-2.5 px-3 text-center text-slate-500 uppercase font-mono text-[11px]">
-                    {it.unit || 'PCS'}
-                  </td>
-                  <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                    {it.quantity}
-                  </td>
-                  <td className="py-2.5 px-3 text-right font-semibold text-slate-700">
-                    ${it.costPrice.toFixed(2)}
-                  </td>
-                  <td className="py-2.5 px-3 text-right text-slate-500">
-                    ${(it.sellingPrice || 0).toFixed(2)}
-                  </td>
-                  <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                    ${it.total.toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Tab Navigation */}
+        <div className="flex border-b border-slate-200 gap-4 text-xs font-bold">
+          <button
+            type="button"
+            onClick={() => setActiveTab('items')}
+            className={`pb-2 flex items-center gap-1.5 border-b-2 transition-colors ${
+              activeTab === 'items'
+                ? 'border-slate-900 text-slate-900'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <Package className="w-3.5 h-3.5" />
+            <span>Products & Billing ({purchase.items.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('history')}
+            className={`pb-2 flex items-center gap-1.5 border-b-2 transition-colors ${
+              activeTab === 'history'
+                ? 'border-slate-900 text-slate-900'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Audit History ({(purchase.history || []).length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('attachments')}
+            className={`pb-2 flex items-center gap-1.5 border-b-2 transition-colors ${
+              activeTab === 'attachments'
+                ? 'border-slate-900 text-slate-900'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <Paperclip className="w-3.5 h-3.5" />
+            <span>Attachments & Receipts ({(purchase.attachments || []).length})</span>
+          </button>
         </div>
 
-        {/* Financial Summary Breakdown */}
-        <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-2 text-xs">
-          <div className="flex justify-between text-slate-600">
-            <span>Subtotal ({totalQuantity} units):</span>
-            <span className="font-bold text-slate-800">${(purchase.subtotal || purchase.totalAmount).toFixed(2)}</span>
-          </div>
-
-          {(purchase.discount || 0) > 0 && (
-            <div className="flex justify-between text-emerald-600 font-medium">
-              <span>Supplier Discount:</span>
-              <span>-${(purchase.discount || 0).toFixed(2)}</span>
+        {activeTab === 'items' && (
+          <>
+            {/* Itemized Table */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    <th className="py-2.5 px-3">Product Name</th>
+                    <th className="py-2.5 px-3 text-center">Unit</th>
+                    <th className="py-2.5 px-3 text-right">Quantity</th>
+                    <th className="py-2.5 px-3 text-right">Unit Cost</th>
+                    <th className="py-2.5 px-3 text-right">Selling Price</th>
+                    <th className="py-2.5 px-3 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {purchase.items.map((it, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50">
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">
+                        <div>{it.productName}</div>
+                        {it.sku && <span className="text-[10px] text-slate-400 font-mono">SKU: {it.sku}</span>}
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-slate-500 uppercase font-mono text-[11px]">
+                        {it.unit || 'PCS'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                        {it.quantity}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-slate-700">
+                        ${it.costPrice.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-slate-500">
+                        ${(it.sellingPrice || 0).toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                        ${it.total.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
 
-          <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-200">
-            <span>Total Purchase Amount:</span>
-            <span>${purchase.totalAmount.toFixed(2)}</span>
+            {/* Financial Summary Breakdown */}
+            <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-2 text-xs">
+              <div className="flex justify-between text-slate-600">
+                <span>Subtotal ({totalQuantity} units):</span>
+                <span className="font-bold text-slate-800">${(purchase.subtotal || purchase.totalAmount).toFixed(2)}</span>
+              </div>
+
+              {(purchase.discount || 0) > 0 && (
+                <div className="flex justify-between text-emerald-600 font-medium">
+                  <span>Supplier Discount:</span>
+                  <span>-${(purchase.discount || 0).toFixed(2)}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between text-sm font-black text-slate-900 pt-2 border-t border-slate-200">
+                <span>Total Purchase Amount:</span>
+                <span>${purchase.totalAmount.toFixed(2)}</span>
+              </div>
+
+              <div className="flex justify-between text-slate-700 pt-1 border-t border-slate-100">
+                <span>Paid Outflow ({purchase.paymentMethod || 'Cash'}):</span>
+                <span className="font-bold text-emerald-600">${purchase.paidAmount.toFixed(2)}</span>
+              </div>
+
+              <div className="flex justify-between text-slate-700">
+                <span>Outstanding Due to Supplier:</span>
+                <span
+                  className={`font-black ${
+                    (purchase.supplierBalance || 0) > 0 ? 'text-amber-600' : 'text-slate-500'
+                  }`}
+                >
+                  ${(purchase.supplierBalance || 0).toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {purchase.notes && (
+              <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs">
+                <span className="font-bold text-slate-500 block text-[10px] uppercase tracking-wider mb-1">
+                  Internal Notes / Logistics Reference
+                </span>
+                <p className="text-slate-700">{purchase.notes}</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Audit History Tab */}
+        {activeTab === 'history' && (
+          <div className="space-y-3">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs text-slate-600">
+              Complete chronological audit trail of all actions, inventory updates, and reversals recorded for Purchase Order #{purchase.id}.
+            </div>
+
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white overflow-hidden text-xs">
+              {(purchase.history && purchase.history.length > 0) ? (
+                purchase.history.map((h, i) => (
+                  <div key={h.id || i} className="p-3.5 flex items-start gap-3 hover:bg-slate-50/50">
+                    <div className="w-2 h-2 rounded-full bg-slate-900 mt-1.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-900 uppercase text-[11px] tracking-wider">
+                          {h.action}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {new Date(h.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-slate-700 text-xs mt-0.5">{h.details}</p>
+                      <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                        <User className="w-3 h-3 inline" />
+                        <span>Actor: {h.actor || 'System / Admin'}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 text-center text-slate-400 text-xs">
+                  No historical entries recorded.
+                </div>
+              )}
+            </div>
           </div>
+        )}
 
-          <div className="flex justify-between text-slate-700 pt-1 border-t border-slate-100">
-            <span>Paid Outflow ({purchase.paymentMethod || 'Cash'}):</span>
-            <span className="font-bold text-emerald-600">${purchase.paidAmount.toFixed(2)}</span>
-          </div>
+        {/* Attachments & Documents Tab */}
+        {activeTab === 'attachments' && (
+          <div className="space-y-4">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between gap-3 text-xs">
+              <div>
+                <h5 className="font-bold text-slate-900">Protected Document Storage</h5>
+                <p className="text-slate-500 text-[11px]">Upload supplier invoices, receipts, and customs documents.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={newAttCategory}
+                  onChange={(e) => setNewAttCategory(e.target.value as any)}
+                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-hidden"
+                >
+                  <option value="invoice">Supplier Invoice</option>
+                  <option value="receipt">Payment Receipt</option>
+                  <option value="waybill">Waybill / Delivery</option>
+                  <option value="other">Other Document</option>
+                </select>
+                <label className="cursor-pointer px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Add File</span>
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    accept="image/*,.pdf,.doc,.docx"
+                    multiple
+                  />
+                </label>
+              </div>
+            </div>
 
-          <div className="flex justify-between text-slate-700">
-            <span>Outstanding Due to Supplier:</span>
-            <span
-              className={`font-black ${
-                (purchase.supplierBalance || 0) > 0 ? 'text-amber-600' : 'text-slate-500'
-              }`}
-            >
-              ${(purchase.supplierBalance || 0).toFixed(2)}
-            </span>
-          </div>
-        </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {(purchase.attachments && purchase.attachments.length > 0) ? (
+                purchase.attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col justify-between gap-3 text-xs hover:border-slate-300 transition-colors"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-blue-50 text-blue-700 rounded-lg shrink-0">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-slate-900 truncate" title={att.name}>{att.name}</p>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5 uppercase tracking-wider font-semibold">
+                          <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600">{att.category}</span>
+                          {att.sizeBytes && <span>{Math.round(att.sizeBytes / 1024)} KB</span>}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Added {new Date(att.uploadedAt).toLocaleDateString()} by {att.uploadedBy}
+                        </p>
+                      </div>
+                    </div>
 
-        {purchase.notes && (
-          <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs">
-            <span className="font-bold text-slate-500 block text-[10px] uppercase tracking-wider mb-1">
-              Internal Notes / Logistics Reference
-            </span>
-            <p className="text-slate-700">{purchase.notes}</p>
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                      {(() => {
+                        const url = att.fileUrl || att.dataUrl || '';
+                        if (!url) {
+                          return <span className="text-[11px] text-slate-400">File attached</span>;
+                        }
+                        if (url.startsWith('data:')) {
+                          return (
+                            <a
+                              href={url}
+                              download={att.name}
+                              className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download</span>
+                            </a>
+                          );
+                        }
+                        return (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>View Doc</span>
+                          </a>
+                        );
+                      })()}
+                      <button
+                        type="button"
+                        onClick={() => removePurchaseAttachment(purchase.id, att.id)}
+                        className="text-xs font-semibold text-rose-500 hover:text-rose-700 flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-2 p-8 text-center bg-white rounded-xl border border-dashed border-slate-200">
+                  <Paperclip className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-semibold text-slate-600">No attachments uploaded yet</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Use the upload button above to attach invoices or bills.</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

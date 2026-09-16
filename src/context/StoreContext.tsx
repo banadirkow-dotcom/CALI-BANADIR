@@ -22,6 +22,8 @@ import {
   Expense,
   Income,
   Purchase,
+  PurchaseAttachment,
+  PurchaseAuditEvent,
   StoreSettings,
   User,
   CargoShipment,
@@ -31,6 +33,7 @@ import {
   OrderPaymentStatus,
   AuditLog,
   SystemPortal,
+  SystemBackupPoint,
 } from '../types';
 
 interface StoreContextType {
@@ -58,6 +61,7 @@ interface StoreContextType {
   settings: StoreSettings;
   currentUser: User;
   auditLogs: AuditLog[];
+  preResetBackup: SystemBackupPoint | null;
 
   // Portal State
   currentPortal: SystemPortal;
@@ -135,11 +139,15 @@ interface StoreContextType {
   createPurchase: (purchase: Omit<Purchase, 'id' | 'purchaseNo' | 'createdAt'>) => Purchase;
   cancelPurchase: (purchaseId: string, reason?: string) => { success: boolean; message: string };
   addPurchase: (purchase: Omit<Purchase, 'id'> | Omit<Purchase, 'id' | 'purchaseNo' | 'createdAt'>) => void;
+  addPurchaseAttachment: (purchaseId: string, attachment: Omit<PurchaseAttachment, 'id' | 'uploadedAt' | 'uploadedBy'>) => void;
+  removePurchaseAttachment: (purchaseId: string, attachmentId: string) => void;
 
   updateSettings: (updates: Partial<StoreSettings>) => void;
   setCurrentUser: (user: User) => void;
   addAuditLog: (action: string, target: string, details?: string) => void;
   factoryReset: (confirmPassword?: string, overrideRole?: string) => boolean;
+  createManualBackup: (reason?: string) => SystemBackupPoint;
+  restorePreResetBackup: () => boolean;
 
   // Financial calculations
   getTodayStats: () => {
@@ -1283,43 +1291,67 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_inventory_movements');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return [];
   });
 
   const [customers, setCustomers] = useState<Customer[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_customers');
-    return saved ? JSON.parse(saved) : INITIAL_CUSTOMERS;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_CUSTOMERS;
   });
 
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_suppliers');
-    return saved ? JSON.parse(saved) : INITIAL_SUPPLIERS;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_SUPPLIERS;
   });
 
   const [supplierPayments, setSupplierPayments] = useState<SupplierPayment[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_supplier_payments');
-    return saved ? JSON.parse(saved) : INITIAL_SUPPLIER_PAYMENTS;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_SUPPLIER_PAYMENTS;
   });
 
   const [sales, setSales] = useState<Sale[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_sales');
-    return saved ? JSON.parse(saved) : INITIAL_SALES;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_SALES;
   });
 
   const [returns, setReturns] = useState<SaleReturn[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_returns');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return [];
   });
 
   const [drivers, setDrivers] = useState<Driver[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_drivers');
-    return saved ? JSON.parse(saved) : INITIAL_DRIVERS;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_DRIVERS;
   });
 
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_deliveries');
-    return saved ? JSON.parse(saved) : INITIAL_DELIVERIES;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_DELIVERIES;
   });
 
   const [accounts, setAccounts] = useState<PaymentAccount[]>(() => {
@@ -1328,33 +1360,56 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [transfers, setTransfers] = useState<AccountTransfer[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_transfers');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return [];
   });
 
   const [expenses, setExpenses] = useState<Expense[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_expenses');
-    return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_EXPENSES;
   });
 
   const [incomes, setIncomes] = useState<Income[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_incomes');
-    return saved ? JSON.parse(saved) : INITIAL_INCOMES;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_INCOMES;
   });
 
   const [purchases, setPurchases] = useState<Purchase[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_purchases');
-    return saved ? JSON.parse(saved) : INITIAL_PURCHASES;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_PURCHASES;
   });
 
   const [cargoShipments, setCargoShipments] = useState<CargoShipment[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_cargo');
-    return saved ? JSON.parse(saved) : INITIAL_CARGO;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_CARGO;
   });
 
   const [orders, setOrders] = useState<Order[]>(() => {
+    const isResetDone = localStorage.getItem('benadir_factory_reset_done') === 'true';
     const saved = localStorage.getItem('benadir_orders');
-    return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+    if (saved) return JSON.parse(saved);
+    if (isResetDone) return [];
+    return INITIAL_ORDERS;
+  });
+
+  const [preResetBackup, setPreResetBackup] = useState<SystemBackupPoint | null>(() => {
+    const saved = localStorage.getItem('benadir_pre_reset_backup');
+    return saved ? JSON.parse(saved) : null;
   });
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
@@ -1657,10 +1712,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const createOrder = (orderData: Omit<Order, 'id' | 'orderNo' | 'createdAt'>): Order => {
-    // 1. Authoritative sequential, collision-safe Order ID (e.g. O00028)
+    // 1. Authoritative sequential, collision-safe Order ID (e.g. O00001, O00002)
     let maxNum = 0;
     orders.forEach((o) => {
-      const match = o.orderNo?.match(/^O(\d+)$/);
+      const match = o.orderNo?.match(/^O(\d+)$/i);
       if (match) {
         const val = parseInt(match[1], 10);
         if (val > maxNum) maxNum = val;
@@ -1671,30 +1726,49 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const id = `order-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const now = new Date().toISOString();
 
-    // 2. Cryptographic non-guessable portal token
+    // 2. Cryptographic non-guessable portal token with 30-day expiration
     const tokenArr = new Uint8Array(16);
     crypto.getRandomValues(tokenArr);
     const portalToken = 'cpt_' + Array.from(tokenArr).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const portalTokenExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    // 3. Advance / Hormaris Allocation calculation
+    // 3. Backend-Authoritative Pricing & Advance / Hormaris Allocation calculation
     const deliveryFeePayer = orderData.deliveryFeePayer || 'Customer';
     const feeOwedByCustomer = deliveryFeePayer === 'Customer'
-      ? (orderData.fulfillmentType === 'Delivery' ? (orderData.deliveryFee || 0) : (orderData.cargoFee || 0))
+      ? (orderData.fulfillmentType === 'Delivery' ? (orderData.deliveryFee || 0) : orderData.fulfillmentType === 'Cargo' ? (orderData.cargoFee || 0) : 0)
       : 0;
-    const advance = orderData.paidAmount || orderData.advanceAmount || 0;
+
+    const subtotalAfterDiscount = Math.max(0, (orderData.subtotal || 0) - (orderData.discount || 0));
+    const authoritativeTotal = subtotalAfterDiscount + feeOwedByCustomer;
+    const advance = Math.max(0, orderData.paidAmount || orderData.advanceAmount || 0);
+
+    // Allocation Order: 1. Delivery fee, 2. Product amount
     const deliveryCovered = Math.min(feeOwedByCustomer, advance);
     const remainingDelivery = Math.max(0, feeOwedByCustomer - deliveryCovered);
     const leftoverForProduct = Math.max(0, advance - deliveryCovered);
-    const subtotalAfterDiscount = Math.max(0, (orderData.subtotal || 0) - (orderData.discount || 0));
     const productCovered = Math.min(subtotalAfterDiscount, leftoverForProduct);
     const remainingProduct = Math.max(0, subtotalAfterDiscount - productCovered);
+
+    // Initial canonical status
+    let initialStatus: OrderLifecycleStatus = 'PAYMENT_PENDING';
+    if (orderData.status && orderData.status !== 'draft') {
+      initialStatus = orderData.status as OrderLifecycleStatus;
+    } else if (advance >= authoritativeTotal && authoritativeTotal > 0) {
+      initialStatus = 'PAID';
+    } else if (advance > 0) {
+      initialStatus = 'PARTIALLY_PAID';
+    }
+
+    let initialFulfillmentStatus: OrderFulfillmentStatus =
+      (orderData.fulfillmentStatus as OrderFulfillmentStatus) ||
+      (orderData.fulfillmentType === 'Pickup' ? 'READY_FOR_PICKUP' : orderData.driverId ? 'ASSIGNED' : 'UNASSIGNED');
 
     const initialEvent: OrderEvent = {
       id: `evt-${Date.now()}-1`,
       orderId: id,
       action: 'ORDER_CREATED',
       title: 'Order Created',
-      description: `Pre-sale order ${orderNo} registered for ${orderData.customerName}. Subtotal: $${(orderData.subtotal || 0).toFixed(2)}, Advance: $${advance.toFixed(2)} (${orderData.fulfillmentType})`,
+      description: `Authoritative order ${orderNo} registered for ${orderData.customerName}. Subtotal: $${(orderData.subtotal || 0).toFixed(2)}, Advance: $${advance.toFixed(2)} (${orderData.fulfillmentType}, Payer: ${deliveryFeePayer})`,
       actor: currentUser.name || 'Admin',
       timestamp: now,
     };
@@ -1703,9 +1777,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...orderData,
       id,
       orderNo,
+      total: authoritativeTotal,
+      paidAmount: advance,
+      advanceAmount: advance,
       portalToken,
+      portalTokenExpiresAt,
+      portalTokenRevoked: false,
       deliveryFeePayer,
-      paymentStatus: orderData.paymentStatus || (advance >= orderData.total ? 'verified' : advance > 0 ? 'partially_paid' : 'unpaid'),
+      status: initialStatus,
+      fulfillmentStatus: initialFulfillmentStatus,
+      paymentStatus: orderData.paymentStatus || (advance >= authoritativeTotal && authoritativeTotal > 0 ? 'verified' : advance > 0 ? 'partially_paid' : 'unpaid'),
       allocation: {
         deliveryFee: feeOwedByCustomer,
         deliveryCovered,
@@ -2013,6 +2094,87 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return `${window.location.origin}?portal_token=${encodeURIComponent(token)}`;
   };
 
+  const createManualBackup = (reason: string = 'Manual System Snapshot'): SystemBackupPoint => {
+    const backupPoint: SystemBackupPoint = {
+      id: `bkp-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }),
+      createdBy: currentUser.name || 'Owner',
+      reason,
+      itemCounts: {
+        products: products.length,
+        customers: customers.length,
+        suppliers: suppliers.length,
+        sales: sales.length,
+        purchases: purchases.length,
+        orders: orders.length,
+        inventoryMovements: inventoryMovements.length,
+      },
+      snapshot: {
+        products,
+        customers,
+        suppliers,
+        supplierPayments,
+        sales,
+        purchases,
+        orders,
+        returns,
+        drivers,
+        deliveries,
+        cargoShipments,
+        expenses,
+        incomes,
+        transfers,
+        accounts,
+        inventoryMovements,
+        settings,
+        categories,
+        brands,
+        units,
+      },
+    };
+    localStorage.setItem('benadir_pre_reset_backup', JSON.stringify(backupPoint));
+    setPreResetBackup(backupPoint);
+    addAuditLog('CREATE_BACKUP', 'SYSTEM', `Backup restore point created: ${reason}`);
+    return backupPoint;
+  };
+
+  const restorePreResetBackup = (): boolean => {
+    try {
+      const backupToRestore = preResetBackup || JSON.parse(localStorage.getItem('benadir_pre_reset_backup') || 'null');
+      if (!backupToRestore || !backupToRestore.snapshot) {
+        return false;
+      }
+      const s = backupToRestore.snapshot;
+      if (s.products) setProducts(s.products);
+      if (s.customers) setCustomers(s.customers);
+      if (s.suppliers) setSuppliers(s.suppliers);
+      if (s.supplierPayments) setSupplierPayments(s.supplierPayments);
+      if (s.sales) setSales(s.sales);
+      if (s.purchases) setPurchases(s.purchases);
+      if (s.orders) setOrders(s.orders);
+      if (s.returns) setReturns(s.returns);
+      if (s.drivers) setDrivers(s.drivers);
+      if (s.deliveries) setDeliveries(s.deliveries);
+      if (s.cargoShipments) setCargoShipments(s.cargoShipments);
+      if (s.expenses) setExpenses(s.expenses);
+      if (s.incomes) setIncomes(s.incomes);
+      if (s.transfers) setTransfers(s.transfers);
+      if (s.accounts) setAccounts(s.accounts);
+      if (s.inventoryMovements) setInventoryMovements(s.inventoryMovements);
+      if (s.settings) setSettings(s.settings);
+      if (s.categories) setCategories(s.categories);
+      if (s.brands) setBrands(s.brands);
+      if (s.units) setUnits(s.units);
+
+      localStorage.removeItem('benadir_factory_reset_done');
+      addAuditLog('RESTORE_BACKUP', 'SYSTEM', `Restored system state from backup point (${backupToRestore.createdAt})`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const factoryReset = (confirmCode: string = 'RESET', overrideRole?: string): boolean => {
     const role = overrideRole || currentUser.role;
     if (role !== 'Owner') {
@@ -2021,6 +2183,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (confirmCode.trim() !== 'RESET') {
       return false;
     }
+
+    // MANDATORY REQUIREMENT: Backup/restore point MUST exist before reset
+    createManualBackup('Pre-Factory Reset Authoritative Snapshot');
 
     // 1. Wipe all business / sample / test data
     setProducts([]);
@@ -2036,6 +2201,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setExpenses([]);
     setIncomes([]);
     setTransfers([]);
+    setCustomers([]);
+    setDrivers([]);
 
     // 2. Clear localStorage keys
     localStorage.setItem('benadir_factory_reset_done', 'true');
@@ -2052,6 +2219,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem('benadir_expenses', JSON.stringify([]));
     localStorage.setItem('benadir_incomes', JSON.stringify([]));
     localStorage.setItem('benadir_transfers', JSON.stringify([]));
+    localStorage.setItem('benadir_customers', JSON.stringify([]));
+    localStorage.setItem('benadir_drivers', JSON.stringify([]));
 
     // Reset accounts to 0 balance for clean commercial start
     setAccounts((prev) =>
@@ -2064,7 +2233,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     addAuditLog(
       'FACTORY_RESET',
       'SYSTEM',
-      'FACTORY RESET COMPLETE - Business/sample/test data has been cleared.'
+      `FACTORY RESET COMPLETE - All business/sample/test data cleared by ${currentUser.name}. Pre-reset backup point preserved.`
     );
 
     return true;
@@ -2884,7 +3053,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const getSupplierStatement = (supplierId: string): SupplierStatementEntry[] => {
-    const supPurchases = purchases.filter((p) => p.supplierId === supplierId && p.status !== 'Cancelled');
+    const supPurchases = purchases.filter((p) => p.supplierId === supplierId);
     const supPayments = supplierPayments.filter((sp) => sp.supplierId === supplierId);
 
     const rawEntries: {
@@ -2902,19 +3071,50 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }[] = [];
 
     supPurchases.forEach((p) => {
-      rawEntries.push({
-        id: p.id,
-        date: p.date,
-        type: 'purchase',
-        referenceNo: p.purchaseNo,
-        description: `Purchase Order ${p.purchaseNo} (${p.items.reduce((s, it) => s + it.quantity, 0)} units)`,
-        debit: p.totalAmount,
-        credit: 0,
-        paymentMethod: p.paymentMethod,
-        accountName: p.accountName,
-        actor: p.actor || 'Admin',
-        notes: p.notes,
-      });
+      if (p.status === 'Cancelled') {
+        // Log original purchase debit, plus explicit reversal entry
+        rawEntries.push({
+          id: p.id,
+          date: p.date,
+          type: 'purchase',
+          referenceNo: p.purchaseNo,
+          description: `Purchase Order ${p.purchaseNo} (Original Invoiced)`,
+          debit: p.totalAmount,
+          credit: 0,
+          paymentMethod: p.paymentMethod,
+          accountName: p.accountName,
+          actor: p.actor || 'Admin',
+          notes: p.notes,
+        });
+
+        rawEntries.push({
+          id: `${p.id}-rev`,
+          date: p.updatedAt ? p.updatedAt.split('T')[0] : p.date,
+          type: 'reversal',
+          referenceNo: `REV-${p.purchaseNo}`,
+          description: `Reversal / Void of Cancelled PO ${p.purchaseNo}`,
+          debit: 0,
+          credit: p.totalAmount,
+          paymentMethod: 'Adjustment',
+          accountName: 'Accounts Payable',
+          actor: p.actor || 'Admin',
+          notes: p.notes,
+        });
+      } else {
+        rawEntries.push({
+          id: p.id,
+          date: p.date,
+          type: 'purchase',
+          referenceNo: p.purchaseNo,
+          description: `Purchase Order ${p.purchaseNo} (${p.items.reduce((s, it) => s + it.quantity, 0)} units)`,
+          debit: p.totalAmount,
+          credit: 0,
+          paymentMethod: p.paymentMethod,
+          accountName: p.accountName,
+          actor: p.actor || 'Admin',
+          notes: p.notes,
+        });
+      }
     });
 
     supPayments.forEach((sp) => {
@@ -2941,7 +3141,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       running = running + e.debit - e.credit;
       return {
         ...e,
-        runningBalance: running,
+        runningBalance: Math.max(0, running),
       };
     });
   };
@@ -2969,7 +3169,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const subtotal = purchaseData.subtotal ?? purchaseData.items.reduce((s, it) => s + it.total, 0);
     const discount = purchaseData.discount || 0;
-    const totalAmount = purchaseData.totalAmount ?? (subtotal - discount);
+    const totalAmount = purchaseData.totalAmount ?? Math.max(0, subtotal - discount);
     const paidAmount = purchaseData.paidAmount || 0;
     const supplierBalance = Math.max(0, totalAmount - paidAmount);
 
@@ -2984,6 +3184,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
+    const initialAudit: PurchaseAuditEvent[] = [
+      {
+        id: `aud-${Date.now()}-1`,
+        timestamp: now,
+        actor: currentUser.name || 'Admin',
+        action: 'CREATED',
+        details: `Purchase Order ${purchaseNo} created with ${purchaseData.items.length} items. Total: $${totalAmount.toFixed(2)}, Paid: $${paidAmount.toFixed(2)}, Balance Due: $${supplierBalance.toFixed(2)}`,
+      },
+    ];
+
     const newPurchase: Purchase = {
       ...purchaseData,
       id,
@@ -2996,6 +3206,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       paidAmount,
       supplierBalance,
       paymentStatus,
+      paymentProvider: purchaseData.paymentProvider || (paidAmount > 0 ? (purchaseData.accountName || purchaseData.paymentMethod) : undefined),
+      referenceNo: purchaseData.referenceNo || purchaseNo,
+      attachments: purchaseData.attachments || [],
+      history: initialAudit,
       status: purchaseData.status || 'Received',
       actor: currentUser.name || 'Admin',
       createdAt: now,
@@ -3137,7 +3351,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         paymentMethod: newPurchase.paymentMethod || 'Cash',
         accountId: newPurchase.accountId,
         accountName: newPurchase.accountName || 'Cash Safe',
-        referenceNo: purchaseNo,
+        referenceNo: purchaseData.referenceNo || purchaseNo,
         notes: `Initial payment for Purchase Order ${purchaseNo}`,
         actor: currentUser.name || 'Admin',
         createdAt: now,
@@ -3227,7 +3441,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       );
     }
 
-    // 4. Update status
+    // 4. Update status and append audit event
+    const cancelAudit: PurchaseAuditEvent = {
+      id: `aud-${Date.now()}-cancel`,
+      timestamp: now,
+      actor: currentUser.name || 'Admin',
+      action: 'CANCELLED',
+      details: `PO #${target.purchaseNo} cancelled and reversed: ${reason}`,
+    };
+
     setPurchases((prev) =>
       prev.map((p) =>
         p.id === purchaseId
@@ -3235,6 +3457,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               ...p,
               status: 'Cancelled',
               notes: (p.notes ? p.notes + ' | ' : '') + `Cancelled: ${reason}`,
+              history: [cancelAudit, ...(p.history || [])],
               updatedAt: now,
             }
           : p
@@ -3243,6 +3466,66 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     addAuditLog('CANCEL_PURCHASE', target.purchaseNo, `Cancelled PO #${target.purchaseNo}. Reversal completed.`);
     return { success: true, message: `Purchase ${target.purchaseNo} successfully cancelled and reversed.` };
+  };
+
+  const addPurchaseAttachment = (
+    purchaseId: string,
+    attachment: Omit<PurchaseAttachment, 'id' | 'uploadedAt' | 'uploadedBy'>
+  ) => {
+    const now = new Date().toISOString();
+    const newAtt: PurchaseAttachment = {
+      ...attachment,
+      id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      uploadedAt: now,
+      uploadedBy: currentUser.name || 'Admin',
+    };
+
+    const auditEvent: PurchaseAuditEvent = {
+      id: `aud-${Date.now()}-att`,
+      timestamp: now,
+      actor: currentUser.name || 'Admin',
+      action: 'ATTACHMENT_ADDED',
+      details: `Attached document: ${attachment.name} (${attachment.category})`,
+    };
+
+    setPurchases((prev) =>
+      prev.map((p) => {
+        if (p.id === purchaseId) {
+          return {
+            ...p,
+            attachments: [...(p.attachments || []), newAtt],
+            history: [auditEvent, ...(p.history || [])],
+            updatedAt: now,
+          };
+        }
+        return p;
+      })
+    );
+  };
+
+  const removePurchaseAttachment = (purchaseId: string, attachmentId: string) => {
+    const now = new Date().toISOString();
+    const auditEvent: PurchaseAuditEvent = {
+      id: `aud-${Date.now()}-rm-att`,
+      timestamp: now,
+      actor: currentUser.name || 'Admin',
+      action: 'ATTACHMENT_REMOVED',
+      details: `Removed attachment ID: ${attachmentId}`,
+    };
+
+    setPurchases((prev) =>
+      prev.map((p) => {
+        if (p.id === purchaseId) {
+          return {
+            ...p,
+            attachments: (p.attachments || []).filter((a) => a.id !== attachmentId),
+            history: [auditEvent, ...(p.history || [])],
+            updatedAt: now,
+          };
+        }
+        return p;
+      })
+    );
   };
 
   const addPurchase = (purchase: any) => {
@@ -3470,10 +3753,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         createPurchase,
         cancelPurchase,
         addPurchase,
+        addPurchaseAttachment,
+        removePurchaseAttachment,
         updateSettings,
         setCurrentUser,
         addAuditLog,
         factoryReset,
+        preResetBackup,
+        createManualBackup,
+        restorePreResetBackup,
         getTodayStats,
         getPeriodStats,
         resetToDefaultData,

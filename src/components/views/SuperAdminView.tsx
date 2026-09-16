@@ -27,15 +27,19 @@ export const SuperAdminView: React.FC = () => {
     accounts,
     orders,
     factoryReset,
+    preResetBackup,
+    createManualBackup,
+    restorePreResetBackup,
     addAuditLog,
     settings,
   } = useStore();
 
   const [auditSearch, setAuditSearch] = useState('');
   const [auditFilter, setAuditFilter] = useState('ALL');
-  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirmation, setResetConfirmation] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [backupNotice, setBackupNotice] = useState<string | null>(null);
 
   // Overall Financial & System KPIs
   const kpis = useMemo(() => {
@@ -90,18 +94,41 @@ export const SuperAdminView: React.FC = () => {
     addAuditLog('DATA_BACKUP_EXPORT', 'System Database', 'Exported JSON full backup file');
   };
 
-  // Factory Reset
+  // Factory Reset Handlers
+  const handleCreateSnapshot = () => {
+    const backup = createManualBackup('Admin Hub Manual Snapshot');
+    setBackupNotice(`Nuqul keyd ah ayaa la abuuray (${backup.createdAt}).`);
+    setTimeout(() => setBackupNotice(null), 5000);
+  };
+
+  const handleRestoreSnapshot = () => {
+    if (!preResetBackup) return;
+    if (confirm(`Ma hubtaa inaad dib u soo celiso xogtii kahor dib-u-celinta (${preResetBackup.createdAt})?`)) {
+      const restored = restorePreResetBackup();
+      if (restored) {
+        setResetMessage('Xogtii hore si guul leh ayaa dib loogu soo celiyay.');
+        setTimeout(() => setResetMessage(null), 5000);
+      } else {
+        alert('Khalad ayaa dhacay intii dib loo soo celinayay xogta.');
+      }
+    }
+  };
+
   const handleExecuteReset = (e: React.FormEvent) => {
     e.preventDefault();
-    if (resetPassword !== '123456') {
-      alert('Furaha sirta ah (Password) waa qalad! Fadlan isticmaal 123456.');
+    if (resetConfirmation.trim() !== 'RESET') {
+      alert('Fadlan si sax ah u qor "RESET" si aad u xaqiijiso.');
       return;
     }
-    factoryReset(resetPassword);
-    setShowResetConfirm(false);
-    setResetPassword('');
-    setResetMessage('Nidaamka si buuxda ayaa dib loogu celiyay bilowgii (Factory Reset Complete).');
-    setTimeout(() => setResetMessage(null), 5000);
+    const success = factoryReset('RESET', 'Owner');
+    if (success) {
+      setShowResetConfirm(false);
+      setResetConfirmation('');
+      setResetMessage('Nidaamka si buuxda ayaa dib loogu celiyay bilowgii (Factory Reset Complete). Xogta hore waxaa lagu keydiyay Restore Point.');
+      setTimeout(() => setResetMessage(null), 7000);
+    } else {
+      alert('Dib u celinta waa la diiday. Kaliya doorka Owner ayaa loo ogolyahay.');
+    }
   };
 
   return (
@@ -334,48 +361,111 @@ export const SuperAdminView: React.FC = () => {
       {/* Factory Reset Confirmation Modal */}
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl border border-rose-200 max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-rose-200 max-w-lg w-full p-6 space-y-4">
             <div className="flex items-center gap-3 text-rose-600">
               <AlertTriangle className="w-6 h-6 shrink-0" />
-              <h3 className="text-base font-extrabold text-slate-900">
-                Digniin: Dib u Celinta Nidaamka (Factory Reset)
-              </h3>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Tani waxay si rasmi ah dib ugu celineysaa xogta ERP bilowgii hore. Dhammaan iibyada cusub,
-              dhaqdhaqaaqa iyo bedelada laguma noqon karo. Fadlan geli furaha sirta ah ee Super Admin (
-              <span className="font-mono font-bold text-rose-600">123456</span>) si aad u xaqiijiso.
-            </p>
-
-            <form onSubmit={handleExecuteReset} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Geli Password-ka (123456)
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Controlled Factory Reset (Owner Only)
+                </h3>
+                <span className="text-[11px] font-bold text-rose-600">
+                  Wipes Demo & Business Data • Preserves Architecture & Schema
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs text-rose-950">
+              <p className="font-semibold leading-relaxed">
+                Tani waxay masaxaysaa kaliya xogta ganacsiga / muunadda (Sample & Test data) si aad u bilowdo ganacsi dhab ah oo nadiif ah:
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                <div className="bg-white/70 p-2 rounded border border-rose-200">
+                  <span className="font-bold text-rose-900 block mb-0.5">La Masaxayo:</span>
+                  <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+                    <li>Dhammaan Badeecadaha</li>
+                    <li>Iibka & Dalabyada</li>
+                    <li>Macaamiisha & Deynka</li>
+                    <li>Alaab-qeybiyaasha & Iibsiga</li>
+                    <li>Dhaqdhaqaaqa Bakhaarka</li>
+                  </ul>
+                </div>
+                <div className="bg-white/70 p-2 rounded border border-emerald-200">
+                  <span className="font-bold text-emerald-900 block mb-0.5">La Badbaadinayo:</span>
+                  <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+                    <li>Database Schema & Tables</li>
+                    <li>Koontooyinka & Lacagaha</li>
+                    <li>Habeynta Settings-ka</li>
+                    <li>Qaybaha (Categories & Brands)</li>
+                    <li>Audit Logs & Xuquuqaha</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-indigo-950">Nuqulka Keydka (Authoritative Restore Point):</span>
+                <span className="text-[10px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded">MANDATORY</span>
+              </div>
+              <p className="text-[11px] text-indigo-900 leading-relaxed">
+                Nidaamku wuxuu si otomaatig ah u qaadayaa nuqul buuxa oo xogta ah (Pre-Reset Snapshot) kahor inta aan waxba la tirtirin, si haddii loo baahdo loogu noqon karo.
+              </p>
+              {preResetBackup && (
+                <div className="text-[11px] font-mono text-indigo-800 pt-1 flex items-center justify-between border-t border-indigo-200 mt-2">
+                  <span>Nuqul Hore: {preResetBackup.createdAt}</span>
+                  <button
+                    type="button"
+                    onClick={handleRestoreSnapshot}
+                    className="text-xs text-indigo-700 underline font-bold hover:text-indigo-900"
+                  >
+                    Dib u soo celi kan hore
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleExecuteReset} className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Si aad u xaqiijiso, fadlan qor kelmadda <span className="font-mono text-rose-600 font-black">RESET</span>:
                 </label>
                 <input
-                  type="password"
+                  type="text"
                   required
-                  value={resetPassword}
-                  onChange={(e) => setResetPassword(e.target.value)}
-                  placeholder="••••••"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-rose-500"
+                  value={resetConfirmation}
+                  onChange={(e) => setResetConfirmation(e.target.value)}
+                  placeholder="Geli RESET"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono tracking-widest uppercase focus:ring-2 focus:ring-rose-500 font-bold text-rose-600"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div className="flex items-center justify-between gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowResetConfirm(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                  onClick={handleCreateSnapshot}
+                  className="px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 border border-indigo-200 rounded-lg"
                 >
-                  Ka Noqo
+                  Qaad Backup Hadda
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-md transition"
-                >
-                  Haa, Dib u Celi Hadda
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetConfirm(false);
+                      setResetConfirmation('');
+                    }}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                  >
+                    Ka Noqo
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={resetConfirmation.trim() !== 'RESET'}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-md transition"
+                  >
+                    Xaqiiji & Bilow Nadiifinta (Execute Reset)
+                  </button>
+                </div>
               </div>
             </form>
           </div>

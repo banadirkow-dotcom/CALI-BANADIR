@@ -13,6 +13,7 @@ import {
 import { Modal } from '../common/Modal';
 import { useStore } from '../../context/StoreContext';
 import { Product } from '../../types';
+import { validateImageFile, compressImageFile } from '../../utils/imageUtils';
 
 interface NewProductModalProps {
   isOpen: boolean;
@@ -49,6 +50,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [minStock, setMinStock] = useState('5');
   const [description, setDescription] = useState('');
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [isCompressing, setIsCompressing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Inline taxonomy creator states
@@ -106,14 +109,24 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
   };
 
-  // Image Upload handler
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImagePreview(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+  // Image Upload handler with validation & compression
+  const handleFile = async (file: File) => {
+    setImageError(null);
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      setImageError(validation.error || 'Invalid image file');
+      return;
+    }
+
+    try {
+      setIsCompressing(true);
+      const compressedUrl = await compressImageFile(file, 800, 800, 0.82);
+      setImagePreview(compressedUrl);
+    } catch {
+      setImageError('Failed to process image file. Please try another image.');
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -299,7 +312,13 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                 className="hidden"
                 onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
               />
-              {imagePreview ? (
+              {isCompressing ? (
+                <div className="space-y-2 p-2">
+                  <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs font-bold text-emerald-800">Optimizing & Compressing...</p>
+                  <p className="text-[10px] text-slate-400">High performance storage</p>
+                </div>
+              ) : imagePreview ? (
                 <div className="relative w-full h-full group">
                   <img
                     src={imagePreview}
@@ -317,6 +336,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                       setImagePreview('');
                     }}
                     className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full hover:bg-rose-700 shadow-xs"
+                    title="Remove Image"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -331,6 +351,9 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                 </div>
               )}
             </div>
+            {imageError && (
+              <p className="text-[11px] text-rose-600 font-semibold mt-1">{imageError}</p>
+            )}
           </div>
 
           {/* Core Identification */}
