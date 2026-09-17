@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   Product,
   ProductCategory,
@@ -30,11 +30,15 @@ import {
   Order,
   OrderItem,
   OrderEvent,
+  OrderLifecycleStatus,
+  OrderFulfillmentStatus,
   OrderPaymentStatus,
+  CustomerPaymentConfirmation,
   AuditLog,
   SystemPortal,
   SystemBackupPoint,
 } from '../types';
+import { buildCustomerPortalUrl } from '../utils/portalUrl';
 
 interface StoreContextType {
   // Data
@@ -76,11 +80,18 @@ interface StoreContextType {
   updateOrder: (orderId: string, updates: Partial<Order>, note?: string) => void;
   updateOrderStatus: (orderId: string, status: Order['status']) => void;
   convertOrderToSale: (orderId: string) => Sale | null;
+  completeOrder: (orderId: string) => Sale | null;
   recordOrderPayment: (orderId: string, amount: number, paymentMethod?: string, paymentProvider?: string, referenceNo?: string) => void;
+  confirmOrderPaymentByCustomer: (orderId: string, amount: number, paymentType: 'advance' | 'full' | 'remaining', method: string, senderPhone?: string, transactionRef?: string) => void;
   verifyOrderPayment: (orderId: string, referenceNo?: string) => void;
+  rejectOrderPayment: (orderId: string, reason: string) => void;
+  assignDriverToOrder: (orderId: string, driverId: string) => void;
+  updateOrderFulfillmentStage: (orderId: string, stage: OrderFulfillmentStatus) => void;
   cancelOrder: (orderId: string, reason?: string) => void;
   getOrderByPortalToken: (token: string) => Order | null;
+  registerExternalOrder: (order: Order) => Order;
   generateCustomerPortalUrl: (order: Order) => string;
+  regenerateOrderPortalToken: (orderId: string) => string;
   processReturn: (returnRecord: Omit<SaleReturn, 'id' | 'returnNo'>) => void;
   addProduct: (product: Omit<Product, 'id' | 'code' | 'createdAt'>) => Product;
   updateProduct: (id: string, updates: Partial<Product>, reason?: string) => void;
@@ -1800,7 +1811,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updatedAt: now,
     };
 
-    setOrders((prev) => [newOrder, ...prev]);
+    setOrders((prev) => {
+      const updated = [newOrder, ...prev];
+      try {
+        localStorage.setItem('benadir_orders', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
     addAuditLog(
       'CREATE_ORDER',
       orderNo,
@@ -2020,33 +2037,277 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
+  const confirmOrderPaymentByCustomer = (
+    orderId: string,
+    amount: number,
+    paymentType: 'advance' | 'full' | 'remaining',
+    method: string,
+    senderPhone?: string,
+    transactionRef?: string
+  ) => {
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((ord) => {
+        if (ord.id === orderId) {
+          // If already confirmed or verified, prevent duplicate spam
+          if (ord.paymentStatus === 'customer_confirmed' || ord.paymentStatus === 'verified') {
+            return ord;
+          }
+
+          const confirmation: CustomerPaymentConfirmation = {
+            amount,
+            paymentType,
+            method,
+            senderPhone,
+            transactionRef,
+            submittedAt: now,
+          };
+
+          const event: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'CUSTOMER_PAYMENT_CONFIRMED',
+            title: 'Payment Confirmed by Customer',
+            description: `Customer submitted payment of $${amount.toFixed(2)} (${paymentType}) via ${method}${senderPhone ? ` from ${senderPhone}` : ''}${transactionRef ? ` [Ref: ${transactionRef}]` : ''}. Awaiting admin verification.`,
+            actor: ord.customerName || 'Customer',
+            timestamp: now,
+            note: transactionRef,
+          };
+
+          addAuditLog(
+            'CUSTOMER_CONFIRM_PAYMENT',
+            ord.orderNo,
+            `Customer confirmed $${amount.toFixed(2)} payment via ${method}. Pending admin verification.`
+          );
+
+          return {
+            ...ord,
+            paymentStatus: 'customer_confirmed' as OrderPaymentStatus,
+            customerConfirmedPayment: confirmation,
+            paymentMethod: method,
+            events: [event, ...(ord.events || [])],
+            updatedAt: now,
+          };
+        }
+        return ord;
+      })
+    );
+  };
+
   const verifyOrderPayment = (orderId: string, referenceNo?: string) => {
     const now = new Date().toISOString();
     setOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId) {
+          // Determine amount to credit: either customerConfirmedPayment.amount or remaining balance
+          const confirmedAmount = ord.customerConfirmedPayment?.amount;
+          const verifiedAddition =
+            confirmedAmount !== undefined && confirmedAmount > 0
+              ? confirmedAmount
+              : Math.max(0, ord.total - ord.paidAmount);
+
+          const newPaid = Math.min(ord.total, ord.paidAmount + verifiedAddition);
+          const remaining = Math.max(0, ord.total - newPaid);
+          const newStatus =
+            ord.status === 'pending' || (ord.status as string) === 'DRAFT' || (ord.status as string) === 'PAYMENT_PENDING'
+              ? 'confirmed'
+              : ord.status;
+          const newPaymentStatus: OrderPaymentStatus = newPaid >= ord.total ? 'verified' : 'partially_paid';
+
+          // Authoritative delivery fee calculation
+          const feeOwed =
+            (ord.deliveryFeePayer || 'Customer') === 'Customer'
+              ? ord.fulfillmentType === 'Delivery'
+                ? ord.deliveryFee
+                : ord.cargoFee
+              : 0;
+          const deliveryCovered = Math.min(feeOwed, newPaid);
+          const remainingDelivery = Math.max(0, feeOwed - deliveryCovered);
+          const leftoverForProduct = Math.max(0, newPaid - deliveryCovered);
+          const subtotalAfterDiscount = Math.max(0, ord.subtotal - ord.discount);
+          const productCovered = Math.min(subtotalAfterDiscount, leftoverForProduct);
+          const remainingProduct = Math.max(0, subtotalAfterDiscount - productCovered);
+
           const verifyEvent: OrderEvent = {
             id: `evt-${Date.now()}`,
             orderId: ord.id,
             action: 'PAYMENT_VERIFIED',
             title: 'Payment Verified',
-            description: `Payment of $${ord.paidAmount.toFixed(2)} verified by ${currentUser.name || 'Staff'}${referenceNo ? ` [Ref: ${referenceNo}]` : ''}`,
+            description: `Payment of $${verifiedAddition.toFixed(2)} verified by ${currentUser.name || 'Staff'}${referenceNo ? ` [Ref: ${referenceNo}]` : ''}. Total paid: $${newPaid.toFixed(2)}, Remaining: $${remaining.toFixed(2)}`,
             actor: currentUser.name || 'Staff',
             timestamp: now,
             note: referenceNo,
           };
-          addAuditLog('VERIFY_ORDER_PAYMENT', ord.orderNo, `Payment of $${ord.paidAmount.toFixed(2)} verified`);
+          addAuditLog('VERIFY_ORDER_PAYMENT', ord.orderNo, `Payment of $${verifiedAddition.toFixed(2)} verified`);
+
+          // Authoritatively credit company payment account
+          if (verifiedAddition > 0) {
+            setAccounts((accs) => {
+              const targetAcc =
+                accs.find((a) => a.type === 'mobile_money' || a.name.includes('EVC') || a.name.includes('Hormuud')) ||
+                accs[0];
+              if (!targetAcc) return accs;
+              return accs.map((a) => (a.id === targetAcc.id ? { ...a, balance: a.balance + verifiedAddition } : a));
+            });
+          }
+
           return {
             ...ord,
-            paymentStatus: 'verified',
+            paidAmount: newPaid,
+            advanceAmount: newPaid,
+            status: newStatus,
+            paymentStatus: newPaymentStatus,
             paymentVerifiedAt: now,
             paymentVerifiedBy: currentUser.name || 'Staff',
-            paymentVerificationReference: referenceNo || ord.paymentVerificationReference,
+            paymentVerificationReference:
+              referenceNo || ord.customerConfirmedPayment?.transactionRef || ord.paymentVerificationReference,
+            allocation: {
+              deliveryFee: feeOwed,
+              deliveryCovered,
+              remainingDelivery,
+              productCovered,
+              remainingProduct,
+              feePayer: ord.deliveryFeePayer || 'Customer',
+            },
             events: [verifyEvent, ...(ord.events || [])],
             updatedAt: now,
           };
         }
         return ord;
+      })
+    );
+  };
+
+  const rejectOrderPayment = (orderId: string, reason: string) => {
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((ord) => {
+        if (ord.id === orderId) {
+          const rejectEvent: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'PAYMENT_REJECTED',
+            title: 'Payment Rejected',
+            description: `Payment confirmation rejected by ${currentUser.name || 'Staff'}. Sabab: ${reason}`,
+            actor: currentUser.name || 'Staff',
+            timestamp: now,
+            note: reason,
+          };
+
+          addAuditLog('REJECT_ORDER_PAYMENT', ord.orderNo, `Payment rejected. Reason: ${reason}`);
+
+          return {
+            ...ord,
+            paymentStatus: 'rejected' as OrderPaymentStatus,
+            paymentRejectionReason: reason,
+            paymentRejectedAt: now,
+            events: [rejectEvent, ...(ord.events || [])],
+            updatedAt: now,
+          };
+        }
+        return ord;
+      })
+    );
+  };
+
+  const completeOrder = (orderId: string): Sale | null => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return null;
+
+    // If already completed and has convertedSaleId, return that sale
+    if (order.convertedSaleId) {
+      const existingSale = sales.find((s) => s.id === order.convertedSaleId);
+      if (existingSale) return existingSale;
+    }
+
+    // Convert order to sale idempotently
+    const newSale = convertOrderToSale(orderId);
+
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'Completed',
+              fulfillmentStatus: 'DELIVERED',
+              convertedSaleId: newSale?.id || o.convertedSaleId,
+              updatedAt: now,
+            }
+          : o
+      )
+    );
+
+    addAuditLog('COMPLETE_ORDER', order.orderNo, `Order marked Completed and finalized into single sale`);
+    return newSale;
+  };
+
+  const assignDriverToOrder = (orderId: string, driverId: string) => {
+    const driver = drivers.find((d) => d.id === driverId);
+    if (!driver) return;
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((o) => {
+        if (o.id === orderId) {
+          const evt: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: o.id,
+            action: 'DRIVER_ASSIGNED',
+            title: 'Driver Assigned',
+            description: `Darawalka: ${driver.name} (${driver.phone}) - Gaariga: ${driver.vehicleType || 'Mooto/Gaaadhi'}`,
+            actor: currentUser.name || 'Dispatcher',
+            timestamp: now,
+          };
+          return {
+            ...o,
+            driverId: driver.id,
+            driverName: driver.name,
+            driverPhone: driver.phone,
+            driverVehicle: driver.vehicleType,
+            fulfillmentStatus: 'ASSIGNED',
+            events: [evt, ...(o.events || [])],
+            updatedAt: now,
+          };
+        }
+        return o;
+      })
+    );
+    addAuditLog('ASSIGN_DRIVER', orderId, `Driver ${driver.name} assigned`);
+  };
+
+  const updateOrderFulfillmentStage = (orderId: string, stage: OrderFulfillmentStatus) => {
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((o) => {
+        if (o.id === orderId) {
+          let updatedLifecycleStatus = o.status;
+          if (stage === 'DELIVERED') {
+            updatedLifecycleStatus = 'delivered';
+          } else if (stage === 'IN_TRANSIT') {
+            updatedLifecycleStatus = 'out_for_delivery';
+          } else if (stage === 'READY') {
+            updatedLifecycleStatus = 'ready';
+          }
+
+          const evt: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: o.id,
+            action: 'FULFILLMENT_STAGE_UPDATED',
+            title: 'Fulfillment Stage Updated',
+            description: `Marxaladda: ${stage}`,
+            actor: currentUser.name || 'Staff',
+            timestamp: now,
+          };
+
+          return {
+            ...o,
+            fulfillmentStatus: stage,
+            status: updatedLifecycleStatus,
+            events: [evt, ...(o.events || [])],
+            updatedAt: now,
+          };
+        }
+        return o;
       })
     );
   };
@@ -2086,12 +2347,88 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getOrderByPortalToken = (token: string): Order | null => {
     if (!token) return null;
-    return orders.find((o) => o.portalToken === token || o.id === token) || null;
+    const clean = token.trim();
+    return (
+      orders.find(
+        (o) =>
+          (o.portalToken && o.portalToken === clean) ||
+          o.id === clean ||
+          o.orderNo.toLowerCase() === clean.toLowerCase()
+      ) || null
+    );
+  };
+
+  const registerExternalOrder = (extOrder: Order): Order => {
+    let savedOrder = extOrder;
+    setOrders((prev) => {
+      const idx = prev.findIndex(
+        (o) =>
+          o.id === extOrder.id ||
+          o.orderNo.toLowerCase() === extOrder.orderNo.toLowerCase() ||
+          (extOrder.portalToken && o.portalToken === extOrder.portalToken)
+      );
+      if (idx >= 0) {
+        const existing = prev[idx];
+        const merged: Order = {
+          ...extOrder,
+          ...existing,
+          paidAmount: Math.max(existing.paidAmount, extOrder.paidAmount),
+          events: existing.events && existing.events.length > 0 ? existing.events : extOrder.events,
+        };
+        const updated = [...prev];
+        updated[idx] = merged;
+        savedOrder = merged;
+        try {
+          localStorage.setItem('benadir_orders', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      } else {
+        const next = [extOrder, ...prev];
+        savedOrder = extOrder;
+        try {
+          localStorage.setItem('benadir_orders', JSON.stringify(next));
+        } catch {}
+        return next;
+      }
+    });
+    return savedOrder;
   };
 
   const generateCustomerPortalUrl = (order: Order): string => {
-    const token = order.portalToken || order.id;
-    return `${window.location.origin}?portal_token=${encodeURIComponent(token)}`;
+    return buildCustomerPortalUrl(order);
+  };
+
+  const regenerateOrderPortalToken = (orderId: string): string => {
+    const tokenArr = new Uint8Array(16);
+    crypto.getRandomValues(tokenArr);
+    const newToken = 'cpt_' + Array.from(tokenArr).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const now = new Date().toISOString();
+    setOrders((prev) =>
+      prev.map((ord) => {
+        if (ord.id === orderId) {
+          const evt: OrderEvent = {
+            id: `evt-${Date.now()}`,
+            orderId: ord.id,
+            action: 'PORTAL_TOKEN_REGENERATED',
+            title: 'Portal Token Regenerated',
+            description: `Customer portal token was regenerated by ${currentUser.name || 'Staff'}.`,
+            actor: currentUser.name || 'Staff',
+            timestamp: now,
+          };
+          return {
+            ...ord,
+            portalToken: newToken,
+            portalTokenExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            portalTokenRevoked: false,
+            events: [evt, ...(ord.events || [])],
+            updatedAt: now,
+          };
+        }
+        return ord;
+      })
+    );
+    addAuditLog('REGENERATE_PORTAL_TOKEN', orderId, `New secure portal token generated: ${newToken}`);
+    return newToken;
   };
 
   const createManualBackup = (reason: string = 'Manual System Snapshot'): SystemBackupPoint => {
@@ -3704,11 +4041,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updateOrder,
         updateOrderStatus,
         convertOrderToSale,
+        completeOrder,
         recordOrderPayment,
+        confirmOrderPaymentByCustomer,
         verifyOrderPayment,
+        rejectOrderPayment,
+        assignDriverToOrder,
+        updateOrderFulfillmentStage,
         cancelOrder,
         getOrderByPortalToken,
+        registerExternalOrder,
         generateCustomerPortalUrl,
+        regenerateOrderPortalToken,
         processReturn,
         addProduct,
         updateProduct,

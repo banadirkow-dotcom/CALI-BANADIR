@@ -30,10 +30,13 @@ import { SalesReturnModal } from './components/views/SalesReturnModal';
 import { ReceiptModal } from './components/common/ReceiptModal';
 import { OrdersView } from './components/views/OrdersView';
 import { CustomerOrderPortalModal } from './components/views/CustomerOrderPortalModal';
+import { CustomerPortalView } from './components/views/CustomerPortalView';
 import { Sale, Customer, Product, Order } from './types';
+import { decodeOrderData } from './utils/portalUrl';
+import { Search, ShoppingBag, PhoneCall, AlertTriangle } from 'lucide-react';
 
 const MainApp: React.FC = () => {
-  const { convertOrderToSale, getOrderByPortalToken } = useStore();
+  const { convertOrderToSale, getOrderByPortalToken, registerExternalOrder, orders } = useStore();
   const [activeTab, setActiveTab] = useState<NavSection>('dashboard');
 
   // Modals state
@@ -51,22 +54,176 @@ const MainApp: React.FC = () => {
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [isReceivePaymentOpen, setIsReceivePaymentOpen] = useState(false);
   const [directPortalOrder, setDirectPortalOrder] = useState<Order | null>(null);
+  const [isDirectCustomerRoute, setIsDirectCustomerRoute] = useState<boolean>(false);
+  const [searchOrderQuery, setSearchOrderQuery] = useState<string>('');
 
-  // Check URL on load for direct portal token links
+  // Check URL on load for direct portal token links & encoded order payload (pdata)
   React.useEffect(() => {
     try {
+      const pathname = window.location.pathname;
+      const pMatch = pathname.match(/^\/p\/([^/?#]+)/);
+      const tokenFromPath = pMatch ? decodeURIComponent(pMatch[1]) : null;
+
       const params = new URLSearchParams(window.location.search);
-      const token = params.get('portal_token') || params.get('order_token') || params.get('token');
+      const hashParams = window.location.hash.includes('?')
+        ? new URLSearchParams(window.location.hash.split('?')[1])
+        : new URLSearchParams();
+
+      const pdata = params.get('pdata') || params.get('d') || hashParams.get('pdata') || hashParams.get('d');
+      const token =
+        tokenFromPath ||
+        params.get('portal_token') ||
+        params.get('order_token') ||
+        params.get('token') ||
+        hashParams.get('portal_token') ||
+        hashParams.get('token');
+
+      // 1. If payload is present in the link, decode and hydrate it immediately
+      if (pdata) {
+        const decoded = decodeOrderData(pdata);
+        if (decoded) {
+          const registered = registerExternalOrder(decoded);
+          setDirectPortalOrder(registered);
+          setIsDirectCustomerRoute(true);
+          return;
+        }
+      }
+
+      // 2. If token is present, check existing orders
       if (token) {
         const found = getOrderByPortalToken(token);
         if (found) {
           setDirectPortalOrder(found);
+          setIsDirectCustomerRoute(true);
+        } else {
+          // Token provided in URL, so user definitely intended to visit the customer portal!
+          // Mark customer route as true so they are NOT dumped into the admin POS system!
+          setIsDirectCustomerRoute(true);
         }
+      } else if (tokenFromPath || pathname.startsWith('/p/')) {
+        setIsDirectCustomerRoute(true);
       }
-    } catch {
-      // safe fallback
+    } catch (err) {
+      console.error('Portal routing error:', err);
     }
-  }, [getOrderByPortalToken]);
+  }, [getOrderByPortalToken, registerExternalOrder]);
+
+  // Keep directPortalOrder fresh with live store state
+  const currentPortalOrder = directPortalOrder
+    ? orders.find((o) => o.id === directPortalOrder.id || o.portalToken === directPortalOrder.portalToken) || directPortalOrder
+    : null;
+
+  // Direct standalone PWA portal view for customers
+  if (isDirectCustomerRoute) {
+    if (currentPortalOrder) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex flex-col justify-center">
+          <CustomerPortalView
+            order={currentPortalOrder}
+            isStandalone={true}
+            onClose={() => {
+              setIsDirectCustomerRoute(false);
+              setDirectPortalOrder(null);
+              try {
+                window.history.pushState({}, '', '/');
+              } catch {}
+            }}
+            onNavigateToOrder={(newOrd) => {
+              setDirectPortalOrder(newOrd);
+              try {
+                window.history.pushState({}, '', `/?portal_token=${newOrd.portalToken || newOrd.id}`);
+              } catch {}
+            }}
+          />
+        </div>
+      );
+    }
+
+    // Fallback: If customer clicked a link where token could not be resolved,
+    // display a clean, reassuring Somali portal lookup screen instead of admin POS!
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-7 h-7" />
+          </div>
+
+          <div>
+            <h2 className="text-xl font-black text-white">
+              Benadir Store - Raadi Dalabkaaga
+            </h2>
+            <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+              Xiriirka dalabkaagu ma furmin xogta tooska ah. Fadlan geli lambarkaaga taleefanka ama lambarka dalabka si aad u hesho xisaabta iyo halka uu marayo.
+            </p>
+          </div>
+
+          <div className="space-y-3 text-left">
+            <div>
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block mb-1">
+                Lambarka Dalabka ama Tel:
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchOrderQuery}
+                  onChange={(e) => setSearchOrderQuery(e.target.value)}
+                  placeholder="Tusaale: ORD-1002 ama 61xxxxxxx"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-lime-400"
+                />
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                const clean = searchOrderQuery.trim().toLowerCase();
+                if (!clean) return;
+                const found = orders.find(
+                  (o) =>
+                    o.orderNo.toLowerCase() === clean ||
+                    o.id.toLowerCase() === clean ||
+                    (o.customerPhone && o.customerPhone.includes(clean))
+                );
+                if (found) {
+                  setDirectPortalOrder(found);
+                } else {
+                  alert('Lama helin dalab u dhigma xogtaada. Fadlan hubi lambarka ama la xiriir dukaanka.');
+                }
+              }}
+              className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 text-slate-950 text-xs font-black uppercase tracking-wider transition shadow-md shadow-lime-400/20"
+            >
+              Raadi Dalabka
+            </button>
+          </div>
+
+          <div className="pt-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+            <a
+              href="https://wa.me/252615001234?text=Salaamu%20Calaykum%2C%20waxaan%20rabaa%20in%20aan%20ogaado%20dalabkayga"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-lime-400 hover:underline font-semibold"
+            >
+              <PhoneCall className="w-3.5 h-3.5" />
+              <span>Nala Xiriir (WhatsApp)</span>
+            </a>
+
+            <button
+              onClick={() => {
+                if (orders.length > 0) {
+                  setDirectPortalOrder(orders[0]);
+                } else {
+                  setIsDirectCustomerRoute(false);
+                }
+              }}
+              className="text-slate-400 hover:text-white"
+            >
+              Tus Dalabkii Ugu Dambeeyay
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Quick sale pre-fill product
   const [prefilledProduct, setPrefilledProduct] = useState<Product | null>(null);
@@ -277,9 +434,9 @@ const MainApp: React.FC = () => {
       />
 
       <CustomerOrderPortalModal
-        isOpen={!!directPortalOrder}
+        isOpen={!!currentPortalOrder && !isDirectCustomerRoute}
         onClose={() => setDirectPortalOrder(null)}
-        order={directPortalOrder}
+        order={currentPortalOrder}
         onConvertSale={(orderId) => {
           const sale = convertOrderToSale(orderId);
           if (sale) {

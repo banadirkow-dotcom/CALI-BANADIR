@@ -16,12 +16,13 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
-import { Product, OrderItem, Customer } from '../../types';
+import { Product, OrderItem, Customer, Order } from '../../types';
+import { MOGADISHU_DISTRICTS } from '../../utils/portalConstants';
 
 interface NewOrderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onOrderCreated?: (orderId: string) => void;
+  onOrderCreated?: (order: Order) => void;
 }
 
 export const NewOrderModal: React.FC<NewOrderModalProps> = ({
@@ -46,6 +47,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   // Fulfillment State
   const [fulfillmentType, setFulfillmentType] = useState<'Pickup' | 'Delivery' | 'Cargo'>('Delivery');
   const [deliveryFee, setDeliveryFee] = useState<number>(2.00);
+  const [deliveryFeePayer, setDeliveryFeePayer] = useState<'Customer' | 'Business'>('Customer');
+  const [deliveryDistrict, setDeliveryDistrict] = useState<string>('Hodan');
   const [cargoFee, setCargoFee] = useState<number>(10.00);
   const [deliveryAddress, setDeliveryAddress] = useState<string>('');
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
@@ -78,7 +81,14 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     return cartItems.reduce((sum, item) => sum + item.total, 0);
   }, [cartItems]);
 
-  const activeFee = fulfillmentType === 'Delivery' ? deliveryFee : fulfillmentType === 'Cargo' ? cargoFee : 0;
+  const activeFee =
+    fulfillmentType === 'Delivery'
+      ? deliveryFeePayer === 'Business'
+        ? 0
+        : deliveryFee
+      : fulfillmentType === 'Cargo'
+      ? cargoFee
+      : 0;
   const grandTotal = Math.max(0, subtotal - discount + activeFee);
   const remainingBalance = Math.max(0, grandTotal - paidAdvance);
 
@@ -106,6 +116,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         costPrice: product.costPrice,
         sellingPrice: product.sellingPrice,
         total: product.sellingPrice,
+        imageUrl: product.imageUrl,
       };
       setCartItems((prev) => [...prev, newItem]);
     }
@@ -154,7 +165,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const created = addCustomer({
         name: newCustName.trim(),
         phone: newCustPhone.trim(),
-        address: newCustAddress.trim() || 'Mogadishu',
+        address: newCustAddress.trim() || `${deliveryDistrict}, Mogadishu`,
         balance: 0,
         creditLimit: 500,
         status: 'active',
@@ -184,13 +195,15 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       items: cartItems,
       subtotal,
       discount,
-      deliveryFee: fulfillmentType === 'Delivery' ? deliveryFee : 0,
+      deliveryFee: fulfillmentType === 'Delivery' ? (deliveryFeePayer === 'Business' ? 0 : deliveryFee) : 0,
+      deliveryFeePayer: fulfillmentType === 'Delivery' ? deliveryFeePayer : undefined,
+      deliveryDistrict: fulfillmentType === 'Delivery' ? deliveryDistrict : undefined,
       cargoFee: fulfillmentType === 'Cargo' ? cargoFee : 0,
       total: grandTotal,
       paidAmount: paidAdvance,
       advanceAmount: paidAdvance,
       fulfillmentType,
-      deliveryAddress: fulfillmentType === 'Delivery' ? deliveryAddress : undefined,
+      deliveryAddress: fulfillmentType === 'Delivery' ? (deliveryAddress || deliveryDistrict) : undefined,
       driverId: assignedDriver?.id,
       driverName: assignedDriver?.name,
       cargoCompany: fulfillmentType === 'Cargo' ? cargoCompany : undefined,
@@ -199,7 +212,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     });
 
     if (onOrderCreated) {
-      onOrderCreated(newOrder.id);
+      onOrderCreated(newOrder);
     }
     onClose();
   };
@@ -519,35 +532,101 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
             {/* Sub-inputs for Fulfillment */}
             {fulfillmentType === 'Delivery' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white p-3 rounded-lg border border-slate-200">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Dirawalka Loo Xil-saarayo (Assign Driver)
-                  </label>
-                  <select
-                    value={selectedDriverId}
-                    onChange={(e) => setSelectedDriverId(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900"
-                  >
-                    <option value="">Dooro Dirawal (ama ka tag dambe)</option>
-                    {drivers.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name} ({d.vehicleType}) - Tel: {d.phone}
-                      </option>
-                    ))}
-                  </select>
+              <div className="space-y-3 bg-white p-3.5 rounded-lg border border-slate-200">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Degmada Muqdisho (District) *
+                    </label>
+                    <select
+                      value={deliveryDistrict}
+                      onChange={(e) => setDeliveryDistrict(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900 font-medium"
+                    >
+                      {MOGADISHU_DISTRICTS.map((dist) => (
+                        <option key={dist} value={dist}>
+                          {dist}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Kharashka Gaarsiinta (Yaa Bixinaya?)
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryFeePayer('Customer')}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition text-center ${
+                          deliveryFeePayer === 'Customer'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        Macmiilka (${deliveryFee})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryFeePayer('Business')}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition text-center flex items-center justify-center gap-1 ${
+                          deliveryFeePayer === 'Business'
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>FREE DELIVERY</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Dirawalka Loo Xil-saarayo (Assign Driver)
+                    </label>
+                    <select
+                      value={selectedDriverId}
+                      onChange={(e) => setSelectedDriverId(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900"
+                    >
+                      <option value="">Dooro Dirawal (ama ka tag dambe)</option>
+                      {drivers.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} ({d.vehicleType || 'Mooto'}) - Tel: {d.phone}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Qadarka Gaarsiinta ($)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={deliveryFee}
+                      onChange={(e) => setDeliveryFee(parseFloat(e.target.value) || 0)}
+                      disabled={deliveryFeePayer === 'Business'}
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900 font-mono font-bold disabled:bg-slate-100 disabled:text-slate-400"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Lacagta Gaarsiinta (Delivery Fee $)
+                    Cinwaanka / Astaanta Goobta (Address / Landmark)
                   </label>
                   <input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    value={deliveryFee}
-                    onChange={(e) => setDeliveryFee(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900 font-mono font-bold"
+                    type="text"
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                    placeholder="Tusaale: Kasoo horjeedka Masjidka, Guriga lambar 12..."
+                    className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-900"
                   />
                 </div>
               </div>

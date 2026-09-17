@@ -460,11 +460,22 @@ export type OrderPaymentStatus =
   | 'unpaid'
   | 'initiated'
   | 'pending'
+  | 'customer_confirmed'
   | 'partially_paid'
   | 'verified'
+  | 'rejected'
   | 'paid'
   | 'failed'
   | 'reversed';
+
+export interface CustomerPaymentConfirmation {
+  amount: number;
+  paymentType: 'advance' | 'full' | 'remaining';
+  method: 'EVC Plus' | 'E-Dahab' | 'Jeeb' | string;
+  senderPhone?: string;
+  transactionRef?: string;
+  submittedAt: string;
+}
 
 export interface OrderEvent {
   id: string;
@@ -528,6 +539,9 @@ export interface Order {
   paymentVerificationReference?: string;
   paymentVerifiedAt?: string;
   paymentVerifiedBy?: string;
+  customerConfirmedPayment?: CustomerPaymentConfirmation;
+  paymentRejectionReason?: string;
+  paymentRejectedAt?: string;
   fulfillmentType: FulfillmentType;
   fulfillmentStatus?: OrderFulfillmentStatus | string;
   deliveryAddress?: string;
@@ -548,7 +562,7 @@ export interface Order {
   portalToken?: string;
   portalTokenExpiresAt?: string;
   portalTokenRevoked?: boolean;
-  status: OrderLifecycleStatus | 'pending' | 'confirmed' | 'ready' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'converted';
+  status: OrderLifecycleStatus | 'pending' | 'confirmed' | 'ready' | 'out_for_delivery' | 'delivered' | 'Completed' | 'completed' | 'cancelled' | 'converted';
   convertedSaleId?: string;
   notes?: string;
   events?: OrderEvent[];

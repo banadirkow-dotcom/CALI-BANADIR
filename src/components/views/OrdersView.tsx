@@ -21,13 +21,23 @@ import { useStore } from '../../context/StoreContext';
 import { Order } from '../../types';
 import { NewOrderModal } from './NewOrderModal';
 import { CustomerOrderPortalModal } from './CustomerOrderPortalModal';
+import { CustomerPortalLinkModal } from './CustomerPortalLinkModal';
+import { AdminOrderDetailModal } from './AdminOrderDetailModal';
+import { Share2, Check, X, CreditCard } from 'lucide-react';
 
 interface OrdersViewProps {
   onConvertSale?: (orderId: string) => void;
 }
 
 export const OrdersView: React.FC<OrdersViewProps> = ({ onConvertSale }) => {
-  const { orders, convertOrderToSale, updateOrderStatus, cancelOrder } = useStore();
+  const {
+    orders,
+    convertOrderToSale,
+    updateOrderStatus,
+    cancelOrder,
+    verifyOrderPayment,
+    rejectOrderPayment,
+  } = useStore();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -36,6 +46,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({ onConvertSale }) => {
   // Modals
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [adminDetailOrder, setAdminDetailOrder] = useState<Order | null>(null);
+  const [linkModalOrder, setLinkModalOrder] = useState<Order | null>(null);
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
 
   // Statistics
   const stats = useMemo(() => {
@@ -265,8 +278,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({ onConvertSale }) => {
                       {/* Order No */}
                       <td className="py-3 px-4">
                         <button
-                          onClick={() => setSelectedOrder(order)}
+                          onClick={() => setAdminDetailOrder(order)}
                           className="font-mono font-bold text-slate-900 hover:text-blue-600 flex items-center gap-1.5"
+                          title="Eeg Faahfaahinta Dalabka & Lacag Bixinta"
                         >
                           {order.orderNo}
                           <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-blue-600" />
@@ -370,14 +384,66 @@ export const OrdersView: React.FC<OrdersViewProps> = ({ onConvertSale }) => {
                       {/* Actions */}
                       <td className="py-3 px-4 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* View Detail & Portal */}
+                          {/* LACAG BIXIN Primary Button */}
                           <button
-                            onClick={() => setSelectedOrder(order)}
-                            title="Arag Dalabka & USSD"
+                            id={`btn-order-lacag-bixin-${order.id}`}
+                            onClick={() => {
+                              setLinkModalOrder(order);
+                              setIsLinkModalOpen(true);
+                            }}
+                            title="Xiriirka Lacag Bixinta (LACAG BIXIN)"
+                            className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-black text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-xs transition active:scale-95"
+                          >
+                            <CreditCard className="w-3 h-3" />
+                            <span>LACAG BIXIN</span>
+                          </button>
+
+                          {/* Share Modal */}
+                          <button
+                            id={`btn-order-share-${order.id}`}
+                            onClick={() => {
+                              setLinkModalOrder(order);
+                              setIsLinkModalOpen(true);
+                            }}
+                            title="La Wadaag Macmiilka (WhatsApp / Copy)"
+                            className="p-1.5 rounded-lg bg-lime-400/20 text-slate-950 hover:bg-lime-400 font-bold transition"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* View Admin Details */}
+                          <button
+                            id={`btn-order-detail-${order.id}`}
+                            onClick={() => setAdminDetailOrder(order)}
+                            title="Faahfaahinta Dalabka & Maamulka"
                             className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
+
+                          {/* Quick Admin Verification for Customer-Confirmed Payments */}
+                          {order.paymentStatus === 'customer_confirmed' && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => verifyOrderPayment(order.id)}
+                                title="Xaqiiji Lacagta Macmiilka (Verify Payment)"
+                                className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center gap-0.5"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Verify</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const reason = window.prompt('Geli sababta diidmada lacagta:');
+                                  if (reason) rejectOrderPayment(order.id, reason);
+                                }}
+                                title="Diid Lacag Bixinta (Reject Payment)"
+                                className="p-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px]"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
 
                           {/* Convert to Sale Button */}
                           {order.status !== 'converted' && order.status !== 'cancelled' && (
@@ -416,10 +482,34 @@ export const OrdersView: React.FC<OrdersViewProps> = ({ onConvertSale }) => {
       <NewOrderModal
         isOpen={isNewOrderOpen}
         onClose={() => setIsNewOrderOpen(false)}
-        onOrderCreated={(orderId) => {
-          const ord = orders.find((o) => o.id === orderId);
-          if (ord) setSelectedOrder(ord);
+        onOrderCreated={(createdOrder) => {
+          setLinkModalOrder(createdOrder);
+          setIsLinkModalOpen(true);
         }}
+      />
+
+      {/* Share / Customer Portal Link Modal */}
+      <CustomerPortalLinkModal
+        isOpen={isLinkModalOpen}
+        onClose={() => {
+          setIsLinkModalOpen(false);
+          setLinkModalOrder(null);
+        }}
+        order={linkModalOrder}
+        onOpenPortalModal={(ord) => {
+          setSelectedOrder(ord);
+        }}
+      />
+
+      {/* Admin Order Details & Customer Portal Management Modal */}
+      <AdminOrderDetailModal
+        isOpen={!!adminDetailOrder}
+        onClose={() => setAdminDetailOrder(null)}
+        order={adminDetailOrder}
+        onOpenCustomerPortal={(ord) => {
+          setSelectedOrder(ord);
+        }}
+        onConvertSale={handleConvert}
       />
 
       {/* Customer Order Portal & Tracking Modal */}
